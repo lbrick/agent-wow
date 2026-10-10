@@ -1,0 +1,5 @@
+# Build context for modules/classic/Dockerfile: keep local data and binaries out.
+/tmp/
+/bin/
+/data/
+.git/

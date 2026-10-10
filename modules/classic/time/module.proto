@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+// The go-module-template example for the WoW 1.12.1 client, where
+// SMSG_QUERY_TIME_RESPONSE carries only the server time.
+package agentwow.classic.time.v1;
+option go_package = "github.com/agent-wow/agent-wow/modules/classic/time/api;timev1";
+
+import "api/module/v1/session.proto";
+import "google/protobuf/empty.proto";
+
+message StatusResponse {
+  uint32 client_time_ms = 1;
+  uint32 packets_received = 2;
+  optional uint32 server_time_unix = 3;
+}
+
+service Time {
+  rpc Status(google.protobuf.Empty) returns (StatusResponse);
+  rpc QueryTime(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc OnPacket(agentwow.module.v1.WorldPacket) returns (google.protobuf.Empty);
+  rpc BeforeLogout(google.protobuf.Empty) returns (google.protobuf.Empty);
+}

@@ -1,0 +1,21 @@
+api_version: 1
+enabled: true
+description: Straight-line ground movement for WoW 1.12.1 (build 5875), with speed and teleport acknowledgements
+requires: [world]
+compose:
+  file: compose.yaml
+  service: module
+grpc:
+  descriptor_set: module.pb
+rpc:
+  move_to: /agentwow.classic.movement.v1.Movement/MoveTo
+  face: /agentwow.classic.movement.v1.Movement/Face
+packets:
+  SMSG_FORCE_RUN_SPEED_CHANGE: /agentwow.classic.movement.v1.Movement/OnPacket
+  SMSG_FORCE_RUN_BACK_SPEED_CHANGE: /agentwow.classic.movement.v1.Movement/OnPacket
+  SMSG_FORCE_SWIM_SPEED_CHANGE: /agentwow.classic.movement.v1.Movement/OnPacket
+  SMSG_FORCE_WALK_SPEED_CHANGE: /agentwow.classic.movement.v1.Movement/OnPacket
+  SMSG_FORCE_SWIM_BACK_SPEED_CHANGE: /agentwow.classic.movement.v1.Movement/OnPacket
+  SMSG_FORCE_TURN_RATE_CHANGE: /agentwow.classic.movement.v1.Movement/OnPacket
+  MSG_MOVE_TELEPORT_ACK: /agentwow.classic.movement.v1.Movement/OnPacket
+  SMSG_NEW_WORLD: /agentwow.classic.movement.v1.Movement/OnPacket
