@@ -14,6 +14,7 @@ Usage: ./run build [go build flags]
        ./run charcatalog:generate [12340|5875]
        ./run mapcatalog:generate [12340|5875]
        ./run opcodecatalog:generate [12340|5875]
+       ./run factioncatalog:generate
 
 Examples:
   ./run build
@@ -61,7 +62,7 @@ case "${1:-}" in
         fi
         exec go run ./tools/clientdata "$@"
         ;;
-    charcatalog:generate|mapcatalog:generate|opcodecatalog:generate)
+    charcatalog:generate|mapcatalog:generate|opcodecatalog:generate|factioncatalog:generate)
         generator="${1%:generate}"
         shift
         if [ "$#" -gt 1 ]; then
