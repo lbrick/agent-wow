@@ -22,7 +22,7 @@ const (
 // WoW 1.12.1 (build 5875) references for cMaNGOS Classic. Opcodes.h is public;
 // the DBC tables and playercreateinfo.tsv come from a server's own data:
 //
-//	cp <mangosd DataDir>/dbc/{CharSections,CharHairGeosets,CharacterFacialHairStyles,Map,AreaTable}.dbc tmp/client-data-5875/
+//	cp <mangosd DataDir>/dbc/{CharSections,CharHairGeosets,CharacterFacialHairStyles,Map,AreaTable,FactionTemplate}.dbc tmp/client-data-5875/
 //	mariadb -N -e 'SELECT race, class FROM playercreateinfo ORDER BY race, class' <world db> > tmp/client-data-5875/playercreateinfo.tsv
 //
 // The generators verify every file against the checksums below.
@@ -37,6 +37,7 @@ const (
 	ClassicMapSHA256      = "4bb6b53841b113eb0ec4fa624ef42d7de7ebdd5169aac17d3e6f9a4f73654245"
 	ClassicAreaSHA256     = "ac4c33c2ae65d37ab801050adf489ea5286d7dd9f9ebf78e6e5c7120418a3528"
 	ClassicClassesSHA256  = "9ddef03b1286388bb357d1f1ecb13f5ba02e65e0427c8a16843f33e68a658937"
+	ClassicFactionSHA256  = "40fe48125299c89d9e9c0169810c000c863aaa22000ae2bb073b55bc8f2036cc"
 )
 
 // Read reads a local reference file, explaining how to fetch missing data.

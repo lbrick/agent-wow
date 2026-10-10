@@ -1,0 +1,25 @@
+api_version: 1
+enabled: true
+description: World state for WoW 1.12.1 (build 5875) - the player and nearby units with reactions
+compose:
+  file: compose.yaml
+  service: module
+grpc:
+  descriptor_set: module.pb
+rpc:
+  self: /agentwow.classic.world.v1.World/Self
+  units: /agentwow.classic.world.v1.World/Units
+  unit: /agentwow.classic.world.v1.World/Unit
+  set_position: /agentwow.classic.world.v1.World/SetPosition
+packets:
+  SMSG_UPDATE_OBJECT: /agentwow.classic.world.v1.World/OnPacket
+  SMSG_COMPRESSED_UPDATE_OBJECT: /agentwow.classic.world.v1.World/OnPacket
+  SMSG_MONSTER_MOVE: /agentwow.classic.world.v1.World/OnPacket
+  SMSG_DESTROY_OBJECT: /agentwow.classic.world.v1.World/OnPacket
+  SMSG_LOGIN_VERIFY_WORLD: /agentwow.classic.world.v1.World/OnPacket
+  SMSG_NEW_WORLD: /agentwow.classic.world.v1.World/OnPacket
+  MSG_MOVE_TELEPORT_ACK: /agentwow.classic.world.v1.World/OnPacket
+  MSG_MOVE_HEARTBEAT: /agentwow.classic.world.v1.World/OnPacket
+  MSG_MOVE_START_FORWARD: /agentwow.classic.world.v1.World/OnPacket
+  MSG_MOVE_STOP: /agentwow.classic.world.v1.World/OnPacket
+  MSG_MOVE_SET_FACING: /agentwow.classic.world.v1.World/OnPacket

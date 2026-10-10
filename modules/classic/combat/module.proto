@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+// Targeting, melee and spell casts for the WoW 1.12.1 client, and a log of
+// combat results.
+package agentwow.classic.combat.v1;
+option go_package = "github.com/agent-wow/agent-wow/modules/classic/combat/api;combatv1";
+
+import "api/module/v1/session.proto";
+import "google/protobuf/empty.proto";
+
+message AttackRequest {
+  uint64 guid = 1;
+}
+
+message CastRequest {
+  uint32 spell_id = 1;
+  // Unit target; 0 casts on self.
+  uint64 target = 2;
+}
+
+message Event {
+  // Milliseconds on the session clock.
+  uint32 time_ms = 1;
+  // attack_start, attack_stop, hit, not_in_range, bad_facing, cannot_attack,
+  // xp, cast_failed, spell_go.
+  string kind = 2;
+  uint64 source = 3;
+  uint64 target = 4;
+  uint32 amount = 5;
+  string detail = 6;
+}
+
+message StatusResponse {
+  // Unit the player is swinging at, or 0.
+  uint64 attacking = 1;
+  // Units that gave kill experience this session.
+  repeated uint64 kills = 2;
+  uint32 xp_gained = 3;
+  // Newest last, at most 50.
+  repeated Event events = 4;
+}
+
+service Combat {
+  // Selects the unit, faces it and starts melee.
+  rpc Attack(AttackRequest) returns (google.protobuf.Empty);
+  rpc StopAttack(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc Cast(CastRequest) returns (google.protobuf.Empty);
+  rpc Status(google.protobuf.Empty) returns (StatusResponse);
+  rpc OnPacket(agentwow.module.v1.WorldPacket) returns (google.protobuf.Empty);
+}

@@ -1,0 +1,25 @@
+api_version: 1
+enabled: true
+description: Targeting, melee, spell casts and a combat log for WoW 1.12.1 (build 5875)
+requires: [world, movement]
+compose:
+  file: compose.yaml
+  service: module
+grpc:
+  descriptor_set: module.pb
+rpc:
+  attack: /agentwow.classic.combat.v1.Combat/Attack
+  stop_attack: /agentwow.classic.combat.v1.Combat/StopAttack
+  cast: /agentwow.classic.combat.v1.Combat/Cast
+  status: /agentwow.classic.combat.v1.Combat/Status
+packets:
+  SMSG_ATTACKSTART: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_ATTACKSTOP: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_ATTACKERSTATEUPDATE: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_ATTACKSWING_NOTINRANGE: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_ATTACKSWING_BADFACING: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_ATTACKSWING_NOTSTANDING: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_ATTACKSWING_DEADTARGET: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_ATTACKSWING_CANT_ATTACK: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_LOG_XPGAIN: /agentwow.classic.combat.v1.Combat/OnPacket
+  SMSG_CAST_RESULT: /agentwow.classic.combat.v1.Combat/OnPacket

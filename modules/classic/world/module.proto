@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+// World state for the WoW 1.12.1 (build 5875) client: the player and the
+// units the server has sent, decoded from SMSG_UPDATE_OBJECT and
+// SMSG_MONSTER_MOVE.
+package agentwow.classic.world.v1;
+option go_package = "github.com/agent-wow/agent-wow/modules/classic/world/api;worldv1";
+
+import "api/module/v1/session.proto";
+import "google/protobuf/empty.proto";
+
+message Position {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+  // Facing in radians.
+  float o = 4;
+}
+
+message SelfInfo {
+  // Zero until the server has sent the player's create block.
+  uint64 guid = 1;
+  uint32 map = 2;
+  Position position = 3;
+  uint32 level = 4;
+  uint32 health = 5;
+  uint32 max_health = 6;
+  uint32 xp = 7;
+  uint32 next_level_xp = 8;
+  uint32 faction_template = 9;
+  // GUID of the current target, or 0.
+  uint64 target = 10;
+  // Yards per second.
+  float run_speed = 11;
+  bool in_combat = 12;
+  bool dead = 13;
+}
+
+message UnitInfo {
+  uint64 guid = 1;
+  // creature_template entry; 0 for players.
+  uint32 entry = 2;
+  bool player = 3;
+  Position position = 4;
+  // Destination of the spline the unit is following, if it is moving.
+  optional Position destination = 5;
+  float distance = 6;
+  uint32 level = 7;
+  uint32 health = 8;
+  uint32 max_health = 9;
+  uint32 faction_template = 10;
+  // How the unit regards the player: hostile, neutral, friendly or unknown.
+  // Hostile units attack on sight; neutral ones can be attacked.
+  string reaction = 11;
+  bool attackable = 12;
+  bool dead = 13;
+  bool lootable = 14;
+  bool in_combat = 15;
+  // GUID of the unit's target, or 0.
+  uint64 target = 16;
+}
+
+message UnitsRequest {
+  // Only units within this many yards; 0 means 100.
+  float radius = 1;
+  // Only units with this reaction (hostile, neutral, friendly); empty for all.
+  string reaction = 2;
+  bool alive_only = 3;
+  // Only creatures with this entry; 0 for all.
+  uint32 entry = 4;
+}
+
+message UnitsResponse {
+  // Nearest first.
+  repeated UnitInfo units = 1;
+}
+
+message UnitRequest {
+  uint64 guid = 1;
+}
+
+message SetPositionRequest {
+  Position position = 1;
+}
+
+service World {
+  rpc Self(google.protobuf.Empty) returns (SelfInfo);
+  rpc Units(UnitsRequest) returns (UnitsResponse);
+  rpc Unit(UnitRequest) returns (UnitInfo);
+  // The client's own movement is not echoed by the server; the movement
+  // module reports it here.
+  rpc SetPosition(SetPositionRequest) returns (google.protobuf.Empty);
+  rpc OnPacket(agentwow.module.v1.WorldPacket) returns (google.protobuf.Empty);
+}

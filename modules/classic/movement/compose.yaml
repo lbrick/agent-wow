@@ -1,0 +1,3 @@
+services:
+  module:
+    image: localhost/agent-wow-classic-movement:dev

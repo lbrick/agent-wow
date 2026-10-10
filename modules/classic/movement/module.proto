@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+// Straight-line ground movement for the WoW 1.12.1 client with MSG_MOVE_*
+// packets at run speed. It does not path-find: the caller picks reachable
+// points in open ground.
+package agentwow.classic.movement.v1;
+option go_package = "github.com/agent-wow/agent-wow/modules/classic/movement/api;movementv1";
+
+import "api/module/v1/session.proto";
+import "google/protobuf/empty.proto";
+
+message MoveToRequest {
+  float x = 1;
+  float y = 2;
+  // Defaults to interpolating the current height.
+  optional float z = 3;
+  // Stop this many yards short of the point, facing it.
+  float stop_distance = 4;
+}
+
+message MoveToResponse {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+  uint32 elapsed_ms = 4;
+}
+
+message FaceRequest {
+  float x = 1;
+  float y = 2;
+}
+
+service Movement {
+  // Blocks until the character arrives; at most 150 yards per call.
+  rpc MoveTo(MoveToRequest) returns (MoveToResponse);
+  rpc Face(FaceRequest) returns (google.protobuf.Empty);
+  rpc OnPacket(agentwow.module.v1.WorldPacket) returns (google.protobuf.Empty);
+}
