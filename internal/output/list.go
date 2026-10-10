@@ -66,10 +66,11 @@ func WriteCharacterJSON(out io.Writer, realm auth.Realm, characters []char.Chara
 		Characters []characterListEntry `json:"characters"`
 	}{Characters: make([]characterListEntry, 0, len(characters))}
 	result.Realm.ID, result.Realm.Name = realm.ID, realm.Name
+	labels := maps.ForBuild(realm.Protocol())
 	for _, ch := range characters {
 		result.Characters = append(result.Characters, characterListEntry{GUID: strconv.FormatUint(uint64(ch.GUID), 10),
 			Name: ch.Name, Race: ch.Race.String(), Class: ch.Class.String(), Gender: ch.Gender.String(),
-			Level: ch.Level, ZoneID: ch.ZoneID, ZoneName: maps.ZoneName(ch.ZoneID), MapID: ch.MapID, MapName: maps.MapName(ch.MapID)})
+			Level: ch.Level, ZoneID: ch.ZoneID, ZoneName: labels.ZoneName(ch.ZoneID), MapID: ch.MapID, MapName: labels.MapName(ch.MapID)})
 	}
 	return writeJSON(out, result)
 }

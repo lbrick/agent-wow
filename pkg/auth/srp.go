@@ -29,17 +29,50 @@ type proof struct {
 	key    [40]byte
 }
 
+// srpVariant selects how a server encodes SRP6 integers in its hashes.
+// AzerothCore hashes fixed-width little-endian values and strips leading zero
+// bytes before interleaving the session key. cMaNGOS Classic (shared/Auth/SRP6.cpp
+// at 8ec338a1) hashes BigNumber::AsByteArray(), which drops high zero bytes,
+// and interleaves all 32 bytes of S.
+type srpVariant struct {
+	trim      func([]byte) []byte
+	stripKeyS bool
+}
+
+var (
+	azerothSRP = srpVariant{trim: func(b []byte) []byte { return b }, stripKeyS: true}
+	classicSRP = srpVariant{trim: trimLE, stripKeyS: false}
+)
+
+// trimLE drops the high zero bytes of a little-endian integer.
+func trimLE(b []byte) []byte {
+	n := len(b)
+	for n > 0 && b[n-1] == 0 {
+		n--
+	}
+	return b[:n]
+}
+
 func newProof(username, password string, c challenge) (proof, error) {
+	return newProofVariant(username, password, c, azerothSRP)
+}
+
+func newProofVariant(username, password string, c challenge, variant srpVariant) (proof, error) {
 	// Draw a fresh, nonzero private exponent for every login.
 	a, err := rand.Int(rand.Reader, new(big.Int).Sub(modulus, big.NewInt(1)))
 	if err != nil {
 		return proof{}, err
 	}
 	a.Add(a, big.NewInt(1))
-	return calculateProof(username, password, c, a)
+	return calculateProofVariant(username, password, c, a, variant)
 }
 
 func calculateProof(username, password string, c challenge, a *big.Int) (proof, error) {
+	return calculateProofVariant(username, password, c, a, azerothSRP)
+}
+
+func calculateProofVariant(username, password string, c challenge, a *big.Int, variant srpVariant) (proof, error) {
+	t := variant.trim
 	var p proof
 	b := fromLittleEndian(c.public[:])
 	if b.Sign() == 0 || b.Cmp(modulus) >= 0 {
@@ -47,13 +80,13 @@ func calculateProof(username, password string, c challenge, a *big.Int) (proof, 
 	}
 	g := big.NewInt(7)
 	p.public = toLittleEndian(new(big.Int).Exp(g, a, modulus))
-	uHash := digest(p.public[:], c.public[:])
+	uHash := digest(t(p.public[:]), t(c.public[:]))
 	u := fromLittleEndian(uHash[:])
 	if u.Sign() == 0 {
 		return proof{}, errors.New("invalid SRP6 scrambling parameter")
 	}
 	identity := digest([]byte(username + ":" + password))
-	xHash := digest(c.salt[:], identity[:])
+	xHash := digest(t(c.salt[:]), identity[:])
 	x := fromLittleEndian(xHash[:])
 	v := new(big.Int).Exp(g, x, modulus)
 	// S = (B - 3*g^x)^(a + u*x) mod N.
@@ -64,7 +97,11 @@ func calculateProof(username, password string, c challenge, a *big.Int) (proof, 
 	if shared.Sign() == 0 {
 		return proof{}, errors.New("invalid SRP6 shared secret")
 	}
-	p.key = sessionKey(toLittleEndian(shared))
+	if variant.stripKeyS {
+		p.key = sessionKey(toLittleEndian(shared))
+	} else {
+		p.key = interleave(toLittleEndian(shared), 0)
+	}
 	nBytes := toLittleEndian(modulus)
 	groupHash := digest(nBytes[:])
 	gHash := digest([]byte{7})
@@ -72,8 +109,8 @@ func calculateProof(username, password string, c challenge, a *big.Int) (proof, 
 		groupHash[i] ^= gHash[i]
 	}
 	usernameHash := digest([]byte(username))
-	p.client = digest(groupHash[:], usernameHash[:], c.salt[:], p.public[:], c.public[:], p.key[:])
-	p.server = digest(p.public[:], p.client[:], p.key[:])
+	p.client = digest(t(groupHash[:]), usernameHash[:], t(c.salt[:]), t(p.public[:]), t(c.public[:]), t(p.key[:]))
+	p.server = digest(t(p.public[:]), t(p.client[:]), t(p.key[:]))
 	return p, nil
 }
 
@@ -85,6 +122,12 @@ func sessionKey(shared [32]byte) [40]byte {
 		start++
 	}
 	start += start % 2
+	return interleave(shared, start)
+}
+
+// interleave hashes the even and odd bytes of shared[start:] separately and
+// interleaves the two digests into the 40-byte session key.
+func interleave(shared [32]byte, start int) [40]byte {
 	var even, odd []byte
 	for i := start; i < len(shared); i += 2 {
 		even = append(even, shared[i])

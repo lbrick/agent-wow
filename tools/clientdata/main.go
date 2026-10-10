@@ -40,17 +40,23 @@ const maxReferenceSize = 16 << 20
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("Usage: ./run client-data:fetch\nDownloads the v20.0 client archive (~1.2 GB) and pinned creation and opcode references to tmp/client-data.")
+		fmt.Println("Usage: ./run client-data:fetch [5875]\nDownloads the v20.0 client archive (~1.2 GB) and pinned creation and opcode references to tmp/client-data.\nWith 5875, downloads cMaNGOS Classic's Opcodes.h to tmp/client-data-5875 and lists the server files to copy there.")
 		return
 	}
-	if len(os.Args) != 1 {
-		fmt.Fprintln(os.Stderr, "Usage: ./run client-data:fetch")
+	classic := len(os.Args) == 2 && os.Args[1] == "5875"
+	if len(os.Args) != 1 && !classic {
+		fmt.Fprintln(os.Stderr, "Usage: ./run client-data:fetch [5875]")
 		os.Exit(2)
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	client := &http.Client{Timeout: 30 * time.Minute}
-	if err := fetch(ctx, client, clientdata.Directory, os.Stdout); err != nil {
+	fetcher := fetch
+	directory := clientdata.Directory
+	if classic {
+		fetcher, directory = fetchClassic, clientdata.ClassicDirectory
+	}
+	if err := fetcher(ctx, client, directory, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "fetch client data:", err)
 		os.Exit(1)
 	}
@@ -74,6 +80,38 @@ func fetch(ctx context.Context, client *http.Client, directory string, out io.Wr
 	}
 	fmt.Fprintf(out, "Client data ready in %s. Run './run charcatalog:generate', './run mapcatalog:generate', or './run opcodecatalog:generate'.\n", directory)
 	return nil
+}
+
+// fetchClassic downloads the public build-5875 opcode header. The DBC tables and
+// race/class list are not published; it reports which ones are missing.
+func fetchClassic(ctx context.Context, client *http.Client, directory string, out io.Writer) error {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	if err := download(ctx, client, clientdata.ClassicOpcodesURL, directory, source{"Opcodes.h", clientdata.ClassicOpcodesSHA256}, maxReferenceSize, out); err != nil {
+		return err
+	}
+	var missing []string
+	for _, src := range classicLocalSources {
+		if !validFile(filepath.Join(directory, src.name), src.sha256) {
+			missing = append(missing, src.name)
+		}
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(out, "Copy these verified server files into %s (see tools/internal/clientdata): %v\n", directory, missing)
+		return nil
+	}
+	fmt.Fprintf(out, "Client data ready in %s. Run './run charcatalog:generate 5875', './run mapcatalog:generate 5875', or './run opcodecatalog:generate 5875'.\n", directory)
+	return nil
+}
+
+var classicLocalSources = []source{
+	{"CharSections.dbc", clientdata.ClassicSectionsSHA256},
+	{"CharHairGeosets.dbc", clientdata.ClassicHairSHA256},
+	{"CharacterFacialHairStyles.dbc", clientdata.ClassicFacialSHA256},
+	{"Map.dbc", clientdata.ClassicMapSHA256},
+	{"AreaTable.dbc", clientdata.ClassicAreaSHA256},
+	{"playercreateinfo.tsv", clientdata.ClassicClassesSHA256},
 }
 
 func download(ctx context.Context, client *http.Client, url, directory string, src source, limit int64, out io.Writer) error {

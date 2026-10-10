@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 // Server contains the host and TCP port of a server.
@@ -29,6 +31,9 @@ type Config struct {
 	AuthServer    Server     `mapstructure:"authserver"`
 	WorldRPC      Server     `mapstructure:"worldrpc"`
 	LogLevel      slog.Level `mapstructure:"log_level"`
+	// ClientBuild selects the client protocol: 12340 (3.3.5a, AzerothCore)
+	// or 5875 (1.12.1, cMaNGOS Classic).
+	ClientBuild int `mapstructure:"client_build"`
 }
 
 var current Config
@@ -38,7 +43,8 @@ var current Config
 // (for example, config.yaml). An explicit configFile must exist. Environment
 // variables use the AGENT_WOW prefix, such as AGENT_WOW_AUTHSERVER_HOST and
 // AGENT_WOW_AUTHSERVER_PORT, AGENT_WOW_WORLDRPC_HOST, and
-// AGENT_WOW_WORLDRPC_PORT. AGENT_WOW_LOG_LEVEL overrides the logging level.
+// AGENT_WOW_WORLDRPC_PORT. AGENT_WOW_LOG_LEVEL overrides the logging level and
+// AGENT_WOW_CLIENT_BUILD the client build.
 // Environment variables take precedence over file settings.
 // Call Init before starting any other client components.
 func Init(configFile string) error {
@@ -54,6 +60,7 @@ func Init(configFile string) error {
 	v.SetDefault("worldrpc.host", "localhost")
 	v.SetDefault("worldrpc.port", 8086)
 	v.SetDefault("log_level", "info")
+	v.SetDefault("client_build", protocol.DefaultBuild)
 
 	if configFile != "" {
 		v.SetConfigFile(configFile)
@@ -105,6 +112,9 @@ func Init(configFile string) error {
 	if err := validateServer("worldrpc", cfg.WorldRPC); err != nil {
 		return err
 	}
+	if _, err := protocol.ForBuild(cfg.ClientBuild); err != nil {
+		return fmt.Errorf("client_build: %w", err)
+	}
 	current = cfg
 	return nil
 }
@@ -112,6 +122,16 @@ func Init(configFile string) error {
 // Get returns a copy of the configuration loaded by Init.
 func Get() Config {
 	return current
+}
+
+// Profile returns the protocol profile for the configured client build.
+// Init has already validated the build.
+func (c Config) Profile() *protocol.Profile {
+	p, err := protocol.ForBuild(c.ClientBuild)
+	if err != nil {
+		panic(err)
+	}
+	return p
 }
 
 func validateServer(name string, server Server) error {

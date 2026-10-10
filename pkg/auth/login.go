@@ -13,12 +13,35 @@ import (
 	"unicode/utf8"
 
 	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 // Login performs a challenge/proof exchange and verifies the server's
 // proof before returning a session. The connection is closed on return or context
 // cancellation. Callers should set a context deadline to bound the whole login.
 func (c *Client) Login(ctx context.Context, username, password string) (*Session, error) {
+	return c.login(ctx, username, password, nil)
+}
+
+// LoginRealms logs in and fetches the realm list on the same connection,
+// returning the new session and the realms. cMaNGOS Classic's realmd stops
+// reading after a reconnect proof (_HandleReconnectProof returns without
+// ProcessIncomingData), so build 5875 can list realms only this way. Each call
+// replaces the server's session key; callers must save the returned session.
+func (c *Client) LoginRealms(ctx context.Context, username, password string) (*Session, []Realm, error) {
+	var realms []Realm
+	session, err := c.login(ctx, username, password, func(conn net.Conn) error {
+		var err error
+		realms, err = c.requestRealms(conn)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return session, realms, nil
+}
+
+func (c *Client) login(ctx context.Context, username, password string, request func(net.Conn) error) (*Session, error) {
 	if len(username) == 0 || len(username) > 17 || !utf8.ValidString(username) || strings.ContainsAny(username, "\x00\r\n") {
 		return nil, errors.New("username must contain 1 to 17 UTF-8 bytes without NUL or newlines")
 	}
@@ -38,26 +61,29 @@ func (c *Client) Login(ctx context.Context, username, password string) (*Session
 			return nil, fmt.Errorf("set authserver deadline: %w", err)
 		}
 	}
-	session, err := exchange(conn, username, password)
+	session, err := c.exchange(conn, username, password)
+	if err == nil && request != nil {
+		err = request(conn)
+	}
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("authenticate: %w", ctx.Err())
 	}
 	return session, err
 }
 
-func exchange(conn net.Conn, username, password string) (*Session, error) {
-	packet := logonChallenge(username)
+func (c *Client) exchange(conn net.Conn, username, password string) (*Session, error) {
+	packet := c.logonChallenge(username)
 	if address, ok := conn.LocalAddr().(*net.TCPAddr); ok {
 		copy(packet[29:33], address.IP.To4())
 	}
 	if _, err := io.Copy(conn, bytes.NewReader(packet)); err != nil {
 		return nil, fmt.Errorf("send logon challenge: %w", err)
 	}
-	c, err := readChallenge(conn)
+	challenge, err := readChallenge(conn)
 	if err != nil {
 		return nil, fmt.Errorf("logon challenge: %w", err)
 	}
-	p, err := newProof(username, password, c)
+	p, err := newProofVariant(username, password, challenge, c.srp())
 	if err != nil {
 		return nil, fmt.Errorf("create logon proof: %w", err)
 	}
@@ -80,24 +106,33 @@ func exchange(conn net.Conn, username, password string) (*Session, error) {
 	if header[1] != 0 {
 		return nil, fmt.Errorf("logon proof: %w", authError(header[1]))
 	}
-	var response [30]byte // M2, account flags, survey ID, login flags.
-	if _, err := io.ReadFull(conn, response[:]); err != nil {
+	// 12340: M2, account flags, survey ID, login flags. 5875
+	// (sAuthLogonProof_S_BUILD_6005): M2 and login flags only.
+	response := make([]byte, 30)
+	if c.profile.Build == protocol.BuildClassic {
+		response = response[:24]
+	}
+	if _, err := io.ReadFull(conn, response); err != nil {
 		return nil, fmt.Errorf("read logon proof: %w", err)
 	}
 	if subtle.ConstantTimeCompare(response[:20], p.server[:]) != 1 {
 		return nil, errors.New("authserver proof verification failed")
 	}
-	return &Session{Username: username, Key: p.key, AccountFlags: binary.LittleEndian.Uint32(response[20:24])}, nil
+	var accountFlags uint32
+	if c.profile.Build != protocol.BuildClassic {
+		accountFlags = binary.LittleEndian.Uint32(response[20:24])
+	}
+	return &Session{Username: username, Key: p.key, AccountFlags: accountFlags}, nil
 }
 
-func logonChallenge(username string) []byte {
+func (c *Client) logonChallenge(username string) []byte {
 	packet := make([]byte, 34+len(username))
 	packet[0] = opcode.AuthLogonChallenge
-	packet[1] = 8
+	packet[1] = c.profile.AuthProtocol
 	binary.LittleEndian.PutUint16(packet[2:4], uint16(len(packet)-4))
 	copy(packet[4:8], "WoW\x00")
-	copy(packet[8:11], []byte{3, 3, 5})
-	binary.LittleEndian.PutUint16(packet[11:13], 12340)
+	copy(packet[8:11], c.profile.Version[:])
+	binary.LittleEndian.PutUint16(packet[11:13], c.profile.Build)
 	copy(packet[13:17], "68x\x00")
 	copy(packet[17:21], "niW\x00")
 	copy(packet[21:25], "SUne")
@@ -167,7 +202,7 @@ func authError(code byte) error {
 		0x06: "account is already online",
 		0x07: "no game time remaining",
 		0x08: "authserver database is busy",
-		0x09: "client version rejected (requires WoW 3.3.5a build 12340 without custom integrity checks)",
+		0x09: "client version rejected (check client_build matches the server's accepted builds; custom integrity checks are unsupported)",
 		0x0a: "client update required",
 		0x0b: "invalid server",
 		0x0c: "account is suspended",
@@ -191,4 +226,12 @@ func upperLatin(value string) string {
 		}
 		return r
 	}, value)
+}
+
+// srp returns how the profile's server encodes SRP6 values in its hashes.
+func (c *Client) srp() srpVariant {
+	if c.profile.Build == protocol.BuildClassic {
+		return classicSRP
+	}
+	return azerothSRP
 }

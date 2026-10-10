@@ -16,6 +16,7 @@ import (
 	"github.com/agent-wow/agent-wow/pkg/account"
 	"github.com/agent-wow/agent-wow/pkg/auth"
 	"github.com/agent-wow/agent-wow/pkg/database"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -77,7 +78,7 @@ On first login, the first available realm from the authservers realm list will b
 				return err
 			}
 			address := authServerAddress()
-			authClient, err := auth.NewClient(address)
+			authClient, err := auth.NewClient(address, config.Get().Profile())
 			if err != nil {
 				return err
 			}
@@ -87,14 +88,25 @@ On first login, the first available realm from the authservers realm list will b
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 			defer cancel()
-			session, err := authClient.Login(ctx, creds.Username, creds.Password)
+			var session *auth.Session
+			var realms []auth.Realm
+			var listErr error
+			if cfg.Profile().Build == protocol.BuildClassic {
+				// cMaNGOS Classic serves the realm list only on the logon connection.
+				session, realms, err = authClient.LoginRealms(ctx, creds.Username, creds.Password)
+			} else {
+				session, err = authClient.Login(ctx, creds.Username, creds.Password)
+			}
 			if err != nil {
 				return errors.Join(err, dbClient.Close())
 			}
 			if err := errors.Join(dbClient.SaveSession(session), dbClient.Close()); err != nil {
 				return fmt.Errorf("persist authenticated session: %w", err)
 			}
-			realms, err := authClient.ListRealms(ctx, session)
+			if realms == nil {
+				realms, listErr = authClient.ListRealms(ctx, session)
+			}
+			err = listErr
 			if err == nil {
 				err = selectLoginRealm(realms)
 			}
@@ -125,7 +137,7 @@ func newAuthStatusCommand() *cobra.Command {
 				return err
 			}
 			address := authServerAddress()
-			authClient, err := auth.NewClient(address)
+			authClient, err := auth.NewClient(address, config.Get().Profile())
 			if err != nil {
 				return err
 			}
@@ -156,6 +168,42 @@ func loadSavedSession() (*auth.Session, error) {
 		return nil, err
 	}
 	return session, nil
+}
+
+// sessionRealms returns a usable session and the current realm list. Build
+// 5875 logs in again with the saved credentials and saves the new session,
+// because cMaNGOS Classic's realmd serves the realm list only after a full
+// logon (see auth.Client.LoginRealms). Other builds reconnect with the saved
+// session and leave it unchanged.
+func sessionRealms(ctx context.Context, client *auth.Client) (*auth.Session, []auth.Realm, error) {
+	cfg := config.Get()
+	if cfg.Profile().Build != protocol.BuildClassic {
+		session, err := loadSavedSession()
+		if err != nil {
+			return nil, nil, err
+		}
+		realms, err := client.ListRealms(ctx, session)
+		return session, realms, err
+	}
+	creds, err := credentials.Read(cfg.AuthFilePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, fmt.Errorf("auth file %q not found; run 'agent-wow auth init' to create it", cfg.AuthFilePath)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	session, realms, err := client.LoginRealms(ctx, creds.Username, creds.Password)
+	if err != nil {
+		return nil, nil, err
+	}
+	dbClient, err := database.NewClient(cfg.DataDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := errors.Join(dbClient.SaveSession(session), dbClient.Close()); err != nil {
+		return nil, nil, fmt.Errorf("persist refreshed session: %w", err)
+	}
+	return session, realms, nil
 }
 
 func authServerAddress() string {

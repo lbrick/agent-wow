@@ -30,3 +30,21 @@ func TestZoneName(t *testing.T) {
 		}
 	}
 }
+
+func TestForBuild(t *testing.T) {
+	classic := maps.ForBuild(5875)
+	for id, want := range map[uint32]string{0: "Eastern Kingdoms", 1: "Kalimdor"} {
+		if got := classic.MapName(id); got != want {
+			t.Errorf("1.12 MapName(%d) = %q, want %q", id, got, want)
+		}
+	}
+	if got := classic.ZoneName(1519); got != "Stormwind City" {
+		t.Errorf("1.12 ZoneName(1519) = %q", got)
+	}
+	if got := classic.MapName(571); got != "Unknown map (571)" {
+		t.Errorf("Northrend resolved in 1.12: %q", got)
+	}
+	if maps.ForBuild(12340).MapName(571) != maps.MapName(571) {
+		t.Error("12340 labels differ from the package defaults")
+	}
+}

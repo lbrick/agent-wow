@@ -13,6 +13,7 @@ import (
 	"github.com/agent-wow/agent-wow/pkg/modules/runner"
 	"github.com/agent-wow/agent-wow/pkg/modules/session"
 	"github.com/agent-wow/agent-wow/pkg/modules/v1"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -63,7 +64,7 @@ func (m *Manager) Start(ctx context.Context, session modsession.Session) error {
 			"AGENT_WOW_SESSION_SOCKET": "/run/agent-wow/session.sock",
 			"AGENT_WOW_MODULE_NAME":    name, "AGENT_WOW_SESSION_ID": filepath.Base(dir),
 			"AGENT_WOW_CHARACTER_GUID": strconv.FormatUint(session.Identity.CharacterGUID, 10), "AGENT_WOW_CHARACTER_NAME": session.Identity.CharacterName,
-			"AGENT_WOW_REALM_ID": strconv.Itoa(int(session.Identity.RealmID)), "AGENT_WOW_REALM_NAME": session.Identity.RealmName, "AGENT_WOW_CLIENT_BUILD": "12340",
+			"AGENT_WOW_REALM_ID": strconv.Itoa(int(session.Identity.RealmID)), "AGENT_WOW_REALM_NAME": session.Identity.RealmName, "AGENT_WOW_CLIENT_BUILD": clientBuild(session.Identity),
 		}}
 		listener, err := net.Listen("unix", filepath.Join(socketDir, "session.sock"))
 		if err != nil {
@@ -111,4 +112,12 @@ func (m *Manager) Start(ctx context.Context, session modsession.Session) error {
 		go func() { defer m.wg.Done(); m.pollHealth(name, inst) }()
 	}
 	return m.Err()
+}
+
+// clientBuild reports the session's client build; zero means the default build.
+func clientBuild(identity modsession.Identity) string {
+	if identity.ClientBuild == 0 {
+		return strconv.Itoa(protocol.DefaultBuild)
+	}
+	return strconv.Itoa(int(identity.ClientBuild))
 }

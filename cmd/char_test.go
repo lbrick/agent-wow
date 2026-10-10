@@ -12,6 +12,7 @@ import (
 
 	"github.com/agent-wow/agent-wow/pkg/auth"
 	"github.com/agent-wow/agent-wow/pkg/char"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 type fakeCharacterClient struct {
@@ -43,6 +44,8 @@ func setupCharacterRealm(t *testing.T) (auth.Realm, *auth.Session) {
 	if err := saveRealm(auth.Realm{ID: 7, Name: "Old Name", Address: "old.invalid:8085"}); err != nil {
 		t.Fatal(err)
 	}
+	// Realms fetched by the commands carry the configured client build.
+	realm.ClientBuild = protocol.BuildWrath
 	return realm, session
 }
 

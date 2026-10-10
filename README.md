@@ -108,6 +108,29 @@ Environment variables take precedence over file settings.
 | `worldrpc.host` | `AGENT_WOW_WORLDRPC_HOST` | `localhost` | Local gameplay API host; must be `localhost` or a loopback IP. |
 | `worldrpc.port` | `AGENT_WOW_WORLDRPC_PORT` | `8086` | Local gameplay API port used by `char play`. |
 | `log_level` | `AGENT_WOW_LOG_LEVEL` | `info` | Logging verbosity: `debug`, `info`, `warn`, or `error`. |
+| `client_build` | `AGENT_WOW_CLIENT_BUILD` | `12340` | Client protocol: `12340` (WoW 3.3.5a, AzerothCore) or `5875` (WoW 1.12.1, cMaNGOS Classic). See [WoW 1.12.1 and cMaNGOS Classic](#wow-1121-and-cmangos-classic). |
+
+#### WoW 1.12.1 and cMaNGOS Classic
+
+`client_build: 5875` speaks the WoW 1.12.1 protocol to a [cMaNGOS Classic](https://github.com/cmangos/mangos-classic) server (written against revision `8ec338a1`). It differs from build 12340 as follows.
+
+| Area | Build 5875 behaviour |
+| --- | --- |
+| Warden | Not implemented. The realm must run with `Warden.Enable = 0` in `anticheat.conf`; a Warden request ends the session with an error naming that setting. |
+| Realm list | cMaNGOS Classic's realmd serves it only on a full logon connection, so every command that refreshes realms logs in again with `auth.json` and saves the new session. `auth status` still checks the saved session without a password. |
+| Realm IDs | The 1.12 realm list carries none; realms are numbered from 1 in list order. |
+| Account names | Use at most 10 characters. realmd silently drops a reconnect for longer names, so `auth status` waits until its timeout; login and gameplay are unaffected. |
+| Character creation | 40 race/class pairs and the 1.12 appearance tables (`pkg/char/profiles_5875_gen.go`). |
+| Opcodes | `pkg/opcode/classic`. Module packet keys resolve against this catalog. |
+
+Example `config.yaml`:
+
+```yaml
+client_build: 5875
+authserver:
+  host: realmd.example.internal
+  port: 3724
+```
 
 ### Authentication
 
@@ -299,7 +322,7 @@ agent-wow will inject a set of environment variables for the module at runtime.
 | `AGENT_WOW_CHARACTER_NAME` | Character name | Name of the character being played. |
 | `AGENT_WOW_REALM_ID` | Decimal integer | ID of the selected realm. |
 | `AGENT_WOW_REALM_NAME` | Realm name | Name of the selected realm. |
-| `AGENT_WOW_CLIENT_BUILD` | `12340` | WoW client build used by agent-wow. |
+| `AGENT_WOW_CLIENT_BUILD` | `12340` or `5875` | WoW client build of the session (the `client_build` setting). Modules parse packets in this build's formats. |
 
 #### Installing modules
 

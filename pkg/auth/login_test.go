@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 func TestLogin(t *testing.T) {
@@ -90,7 +92,7 @@ func TestLogin(t *testing.T) {
 			})
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			client, err := NewClient(address)
+			client, err := NewClient(address, protocol.Wrath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +166,7 @@ func TestLoginCancellation(t *testing.T) {
 				_, err := io.Copy(io.Discard, conn)
 				return err
 			})
-			client, err := NewClient(address)
+			client, err := NewClient(address, protocol.Wrath)
 			if err != nil {
 				t.Fatal(err)
 			}

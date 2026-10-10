@@ -129,17 +129,13 @@ func fetchRealms(cmd *cobra.Command, timeout time.Duration) ([]auth.Realm, error
 	if timeout <= 0 {
 		return nil, errors.New("--timeout must be greater than zero")
 	}
-	session, err := loadSavedSession()
-	if err != nil {
-		return nil, err
-	}
-	client, err := auth.NewClient(authServerAddress())
+	client, err := auth.NewClient(authServerAddress(), config.Get().Profile())
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
-	realms, err := client.ListRealms(ctx, session)
+	_, realms, err := sessionRealms(ctx, client)
 	if err != nil {
 		return nil, fmt.Errorf("%w; if the saved session is invalid, run 'agent-wow auth login'", err)
 	}

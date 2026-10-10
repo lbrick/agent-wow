@@ -9,7 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 type appearanceProfile struct {
@@ -110,7 +110,11 @@ func (c *Client) resolve(o CreateOptions, characters []Character) (CreateResult,
 		hair   [][3]uint8
 	}
 	var candidates []candidate
-	for _, pair := range catalogue.RaceClasses {
+	cat := catalogue
+	if c.wire != nil && c.wire.Profile().Build == protocol.BuildClassic {
+		cat = classicCatalogue
+	}
+	for _, pair := range cat.RaceClasses {
 		race, class := Race(pair[0]), Class(pair[1])
 		if !matches(o.Race, race) || !matches(o.Class, class) {
 			continue
@@ -124,7 +128,7 @@ func (c *Client) resolve(o CreateOptions, characters []Character) (CreateResult,
 		if o.Race == nil && (c.realm.Type == 1 || c.realm.Type == 8) && existingFaction != 0 && faction(race) != existingFaction {
 			continue
 		}
-		for _, p := range catalogue.Profiles {
+		for _, p := range cat.Profiles {
 			if p.Race != race || p.DeathKnight != (class == ClassDeathKnight) || !matches(o.Gender, p.Gender) {
 				continue
 			}
@@ -212,12 +216,12 @@ func (c *Client) Create(ctx context.Context, options CreateOptions) (CreateResul
 			a := result.Appearance
 			body := append([]byte(result.Name), 0)
 			body = append(body, byte(result.Race), byte(result.Class), byte(result.Gender), a.Skin, a.Face, a.HairStyle, a.HairColor, a.FacialHair, 0)
-			err = c.mutate("create", opcode.CMSGCharCreate, opcode.SMSGCharCreate, 0x2f, body, result.Name, 0)
+			err = c.mutate("create", uint32(c.op().CMSGCharCreate), c.op().SMSGCharCreate, c.codes().createSuccess, body, result.Name, 0)
 			if err == nil {
 				return nil
 			}
 			var rejection *ServerError
-			if options.Name != nil || attempt == 4 || !errors.As(err, &rejection) || rejection.Operation != "create" || !(rejection.Code == 0x32 || rejection.Code >= 0x58 && rejection.Code <= 0x67) {
+			if options.Name != nil || attempt == 4 || !errors.As(err, &rejection) || rejection.Operation != "create" || !c.codes().retryableName(rejection.Code) {
 				return err
 			}
 			result.Name = c.generatedName()

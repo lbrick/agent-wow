@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 // Session holds the verified credentials for a subsequent worldserver login.
@@ -49,7 +50,7 @@ func (c *Client) withSession(ctx context.Context, session *Session, request func
 			return fmt.Errorf("set authserver deadline: %w", err)
 		}
 	}
-	err = reconnect(conn, session)
+	err = c.reconnect(conn, session)
 	if err == nil && request != nil {
 		err = request(conn)
 	}
@@ -59,9 +60,9 @@ func (c *Client) withSession(ctx context.Context, session *Session, request func
 	return err
 }
 
-func reconnect(conn net.Conn, session *Session) error {
+func (c *Client) reconnect(conn net.Conn, session *Session) error {
 	username := upperLatin(session.Username)
-	packet := logonChallenge(username)
+	packet := c.logonChallenge(username)
 	packet[0] = opcode.AuthReconnectChallenge
 	if address, ok := conn.LocalAddr().(*net.TCPAddr); ok {
 		copy(packet[29:33], address.IP.To4())
@@ -80,7 +81,10 @@ func reconnect(conn net.Conn, session *Session) error {
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return fmt.Errorf("create reconnect nonce: %w", err)
 	}
-	proof := digest([]byte(username), nonce[:], challenge[:16], session.Key[:])
+	// cMaNGOS Classic hashes R1, its nonce and K as trimmed BigNumbers
+	// (AuthSocket::_HandleReconnectProof); trimming is a no-op for AzerothCore.
+	t := c.srp().trim
+	proof := digest([]byte(username), t(nonce[:]), t(challenge[:16]), t(session.Key[:]))
 	// AzerothCore's reconnect version proof hashes R1 with 20 zero bytes.
 	var zeros [20]byte
 	version := digest(nonce[:], zeros[:])
@@ -89,6 +93,12 @@ func reconnect(conn net.Conn, session *Session) error {
 	copy(packet[1:17], nonce[:])
 	copy(packet[17:37], proof[:])
 	copy(packet[37:57], version[:])
+	if c.profile.Build == protocol.BuildClassic {
+		// mangos-classic _HandleReconnectProof reads sizeof(sAuthReconnectProof_C),
+		// whose first field is cmd, after its dispatcher already consumed the
+		// command byte. Repeat the command so R1, R2 and R3 land where it reads them.
+		packet = append([]byte{opcode.AuthReconnectProof}, packet...)
+	}
 	if _, err := io.Copy(conn, bytes.NewReader(packet)); err != nil {
 		return fmt.Errorf("send reconnect proof: %w", err)
 	}

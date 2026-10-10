@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/agent-wow/agent-wow/pkg/modules/internal/testutil"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
@@ -114,4 +115,23 @@ func TestManifestValidation(t *testing.T) {
 			t.Fatal("accepted duplicate subscription")
 		}
 	})
+}
+
+func TestParseOpcodePerBuild(t *testing.T) {
+	// SMSG_DEFENSE_MESSAGE is the one server opcode numbered differently.
+	for _, tc := range []struct {
+		profile *protocol.Profile
+		want    uint16
+	}{{protocol.Wrath, 0x33a}, {protocol.Classic, 0x33b}} {
+		got, err := parseOpcode("SMSG_DEFENSE_MESSAGE", tc.profile)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: SMSG_DEFENSE_MESSAGE = %#x, %v", tc.profile, got, err)
+		}
+	}
+	if _, err := parseOpcode("SMSG_TIME_SYNC_REQ", protocol.Classic); err == nil {
+		t.Error("1.12 resolved a 3.3.5a-only opcode")
+	}
+	if _, err := parseOpcode("0x1ed", protocol.Classic); err == nil {
+		t.Error("1.12 accepted CMSG_AUTH_SESSION as a server opcode")
+	}
 }

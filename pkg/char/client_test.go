@@ -504,7 +504,7 @@ func TestPacketBoundsAndDeadline(t *testing.T) {
 		{0x80, 0},             // truncated extended header
 	} {
 		left, right := net.Pipe()
-		c := &Client{wire: worldconn.New(left)}
+		c := &Client{wire: worldconn.New(left, nil)}
 		done := make(chan struct{})
 		go func() { defer close(done); defer right.Close(); _, _ = right.Write(header) }()
 		if _, _, err := c.readPacket(); err == nil {
@@ -516,7 +516,7 @@ func TestPacketBoundsAndDeadline(t *testing.T) {
 	left, right := net.Pipe()
 	defer left.Close()
 	defer right.Close()
-	c := &Client{wire: worldconn.New(left)}
+	c := &Client{wire: worldconn.New(left, nil)}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	_, err := c.List(ctx)

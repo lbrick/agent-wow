@@ -44,9 +44,10 @@ func (deps characterCommands) listCommand(timeout *time.Duration) *cobra.Command
 				return err
 			}
 			table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+			labels := maps.ForBuild(realm.Protocol())
 			fmt.Fprintln(table, "GUID\tNAME\tRACE\tCLASS\tGENDER\tLEVEL\tZONE\tMAP")
 			for _, ch := range characters {
-				fmt.Fprintf(table, "%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", ch.GUID, ch.Name, ch.Race, ch.Class, ch.Gender, ch.Level, maps.ZoneName(ch.ZoneID), maps.MapName(ch.MapID))
+				fmt.Fprintf(table, "%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", ch.GUID, ch.Name, ch.Race, ch.Class, ch.Gender, ch.Level, labels.ZoneName(ch.ZoneID), labels.MapName(ch.MapID))
 			}
 			return table.Flush()
 		}}

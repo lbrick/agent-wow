@@ -10,10 +10,10 @@ Usage: ./run build [go build flags]
        ./run dev [commands and flags]
        ./run db:dump
        ./run db:rm
-       ./run client-data:fetch
-       ./run charcatalog:generate
-       ./run mapcatalog:generate
-       ./run opcodecatalog:generate
+       ./run client-data:fetch [5875]
+       ./run charcatalog:generate [12340|5875]
+       ./run mapcatalog:generate [12340|5875]
+       ./run opcodecatalog:generate [12340|5875]
 
 Examples:
   ./run build
@@ -55,20 +55,20 @@ case "${1:-}" in
         ;;
     client-data:fetch)
         shift
-        if [ "$#" -ne 0 ]; then
+        if [ "$#" -gt 1 ]; then
             usage >&2
             exit 2
         fi
-        exec go run ./tools/clientdata
+        exec go run ./tools/clientdata "$@"
         ;;
     charcatalog:generate|mapcatalog:generate|opcodecatalog:generate)
         generator="${1%:generate}"
         shift
-        if [ "$#" -ne 0 ]; then
+        if [ "$#" -gt 1 ]; then
             usage >&2
             exit 2
         fi
-        exec go run "./tools/$generator"
+        exec go run "./tools/$generator" "$@"
         ;;
     ""|-h|--help)
         usage

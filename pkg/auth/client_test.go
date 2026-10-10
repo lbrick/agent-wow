@@ -4,16 +4,18 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 func TestNewClient(t *testing.T) {
 	for _, address := range []string{"localhost:3724", "127.0.0.1:3724", "[::1]:3724"} {
-		if client, err := NewClient(address); err != nil || client == nil {
+		if client, err := NewClient(address, protocol.Wrath); err != nil || client == nil {
 			t.Fatalf("create client for %q: %v", address, err)
 		}
 	}
 	for _, address := range []string{"", "localhost", ":3724", "localhost:", "localhost:abc", "localhost:0", "localhost:65536"} {
-		if client, err := NewClient(address); err == nil || client != nil {
+		if client, err := NewClient(address, protocol.Wrath); err == nil || client != nil {
 			t.Fatalf("accepted invalid authserver address %q", address)
 		}
 	}
