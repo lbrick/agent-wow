@@ -133,7 +133,7 @@ func fetchRealms(cmd *cobra.Command, timeout time.Duration) ([]auth.Realm, error
 	if err != nil {
 		return nil, err
 	}
-	client, err := auth.NewClient(authServerAddress())
+	client, err := auth.NewClient(authServerAddress(), config.Get().Profile())
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"go.yaml.in/yaml/v3"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -132,8 +132,12 @@ type Registry struct {
 	order       []string
 }
 
-// Load validates enabled modules' assets, protobuf contracts, and dependencies without starting services.
-func Load(root string) (*Registry, error) {
+// Load validates enabled modules against the 3.3.5a opcode catalog. See LoadFor.
+func Load(root string) (*Registry, error) { return LoadFor(root, protocol.Wrath) }
+
+// LoadFor validates enabled modules' assets, protobuf contracts, and dependencies
+// without starting services. Packet keys resolve against profile's opcode catalog.
+func LoadFor(root string, profile *protocol.Profile) (*Registry, error) {
 	manifests, err := Discover(root)
 	if err != nil {
 		return nil, err
@@ -143,7 +147,7 @@ func Load(root string) (*Registry, error) {
 		if !m.Enabled {
 			continue
 		}
-		d, err := loadDefinition(m)
+		d, err := loadDefinition(m, profile)
 		if err != nil {
 			return nil, fmt.Errorf("module %s: %w", m.Name, err)
 		}
@@ -217,7 +221,7 @@ func asset(m Manifest, path string) (string, error) {
 	return full, nil
 }
 
-func loadDefinition(m Manifest) (*Definition, error) {
+func loadDefinition(m Manifest, profile *protocol.Profile) (*Definition, error) {
 	compose, err := asset(m, m.Compose.File)
 	if err != nil {
 		return nil, fmt.Errorf("compose file: %w", err)
@@ -282,7 +286,7 @@ func loadDefinition(m Manifest) (*Definition, error) {
 		d.rpc[alias] = md
 	}
 	for key, path := range m.Packets {
-		op, err := parseOpcode(key)
+		op, err := parseOpcode(key, profile)
 		if err != nil {
 			return nil, err
 		}
@@ -326,7 +330,7 @@ func loadDefinition(m Manifest) (*Definition, error) {
 	return d, nil
 }
 
-func parseOpcode(key string) (uint16, error) {
+func parseOpcode(key string, profile *protocol.Profile) (uint16, error) {
 	var value uint64
 	var err error
 	if strings.HasPrefix(key, "0x") {
@@ -335,17 +339,15 @@ func parseOpcode(key string) (uint16, error) {
 		value, err = strconv.ParseUint(key, 10, 16)
 	}
 	if err == nil {
-		name := opcode.WorldName(uint32(value))
+		name := profile.WorldName(uint32(value))
 		if strings.HasPrefix(name, "CMSG_") {
 			return 0, fmt.Errorf("%s is not a server opcode", key)
 		}
 		return uint16(value), nil
 	}
 	if strings.HasPrefix(key, "SMSG_") || strings.HasPrefix(key, "MSG_") {
-		for i := uint32(0); i <= 65535; i++ {
-			if opcode.WorldName(i) == key {
-				return uint16(i), nil
-			}
+		if op, ok := profile.WorldOpcode(key); ok {
+			return op, nil
 		}
 	}
 	return 0, fmt.Errorf("invalid server opcode %q", key)

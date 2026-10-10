@@ -30,7 +30,7 @@ func Dial(ctx context.Context, realm auth.Realm, session *auth.Session) (*Client
 	if err != nil {
 		var rejected *worldconn.AuthError
 		if errors.As(err, &rejected) {
-			return nil, fmt.Errorf("authenticate to realm %q: %w", realm.Name, &ServerError{Operation: "auth", Code: rejected.Code})
+			return nil, fmt.Errorf("authenticate to realm %q: %w", realm.Name, &ServerError{Operation: "auth", Code: rejected.Code, messages: wrathCodes.messages})
 		}
 		return nil, err
 	}

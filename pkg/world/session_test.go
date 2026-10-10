@@ -93,7 +93,7 @@ func peerConnection(t *testing.T, script func(*testPeer)) *worldconn.Conn {
 	right.SetDeadline(time.Now().Add(4 * time.Second))
 	go func() { defer close(done); defer right.Close(); script(&testPeer{t, right}) }()
 	t.Cleanup(func() { left.Close(); right.Close(); <-done })
-	return worldconn.New(left)
+	return worldconn.New(left, nil)
 }
 func startTestSession(t *testing.T, timing timings, script func(*testPeer)) *Session {
 	t.Helper()
@@ -376,7 +376,7 @@ func TestCloseJoinsSessionAndDoesNotConfirmLogout(t *testing.T) {
 func TestExpiredPongDoesNotRenewLiveness(t *testing.T) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
-	e := engine{timing: timings{pong: time.Second}, pongTimer: timer, pings: map[uint32]time.Time{1: time.Now().Add(-2 * time.Second)}}
+	e := engine{s: &Session{conn: worldconn.New(nil, nil)}, timing: timings{pong: time.Second}, pongTimer: timer, pings: map[uint32]time.Time{1: time.Now().Add(-2 * time.Second)}}
 	if _, err := e.handle(0x1dd, []byte{1, 0, 0, 0}); err != nil {
 		t.Fatal(err)
 	}

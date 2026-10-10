@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 const (
@@ -36,15 +37,26 @@ type Realm struct {
 	Timezone   uint8
 	Version    [3]byte
 	Build      uint16 // Present only when RealmFlagSpecifyBuild is set.
+	// ClientBuild is the build the list was requested with. World connections
+	// to this realm speak that build's protocol. Zero means protocol.DefaultBuild.
+	ClientBuild uint16
 }
 
-// Status describes whether this account can select the realm with build 12340.
+// Protocol returns the client build used for this realm's world connection.
+func (r Realm) Protocol() uint16 {
+	if r.ClientBuild == 0 {
+		return protocol.DefaultBuild
+	}
+	return r.ClientBuild
+}
+
+// Status describes whether this account can select the realm with ClientBuild.
 func (r Realm) Status() string {
 	var reasons []string
 	if r.Flags&RealmFlagInvalid != 0 {
 		reasons = append(reasons, "invalid")
 	}
-	if r.Flags&RealmFlagSpecifyBuild != 0 && r.Build != 12340 {
+	if r.Flags&RealmFlagSpecifyBuild != 0 && r.Build != r.Protocol() {
 		reasons = append(reasons, "incompatible build")
 	}
 	if r.Flags&RealmFlagOffline != 0 {
@@ -73,6 +85,9 @@ func (c *Client) ListRealms(ctx context.Context, session *Session) ([]Realm, err
 		}
 		var err error
 		realms, err = readRealms(conn)
+		for i := range realms {
+			realms[i].ClientBuild = c.profile.Build
+		}
 		return err
 	})
 	if err != nil {

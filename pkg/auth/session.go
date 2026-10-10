@@ -49,7 +49,7 @@ func (c *Client) withSession(ctx context.Context, session *Session, request func
 			return fmt.Errorf("set authserver deadline: %w", err)
 		}
 	}
-	err = reconnect(conn, session)
+	err = c.reconnect(conn, session)
 	if err == nil && request != nil {
 		err = request(conn)
 	}
@@ -59,9 +59,9 @@ func (c *Client) withSession(ctx context.Context, session *Session, request func
 	return err
 }
 
-func reconnect(conn net.Conn, session *Session) error {
+func (c *Client) reconnect(conn net.Conn, session *Session) error {
 	username := upperLatin(session.Username)
-	packet := logonChallenge(username)
+	packet := c.logonChallenge(username)
 	packet[0] = opcode.AuthReconnectChallenge
 	if address, ok := conn.LocalAddr().(*net.TCPAddr); ok {
 		copy(packet[29:33], address.IP.To4())

@@ -4,32 +4,31 @@ import (
 	"encoding/binary"
 	"errors"
 	"time"
-
-	"github.com/agent-wow/agent-wow/pkg/opcode"
 )
 
 // The core handles connection lifecycle packets only. Gameplay payloads remain
 // opaque and are routed unchanged to registered modules by the owner loop.
 func (e *engine) handle(op uint16, body []byte) (bool, error) {
-	switch op {
-	case opcode.SMSGLoginVerifyWorld:
+	ops, profile := e.op(), e.s.conn.Profile()
+	switch {
+	case op == ops.SMSGLoginVerifyWorld:
 		if len(body) != 20 {
 			return false, errors.New("invalid login verification length")
 		}
 		e.verified = true
 		e.checkReady()
-	case opcode.SMSGTimeSyncReq:
+	case profile.TimeSync && op == ops.SMSGTimeSyncReq:
 		if len(body) != 4 {
 			return false, errors.New("invalid time-sync request")
 		}
 		response := binary.LittleEndian.AppendUint32(nil, binary.LittleEndian.Uint32(body))
 		response = binary.LittleEndian.AppendUint32(response, e.timestamp())
-		if err := e.write(opcode.CMSGTimeSyncResp, response); err != nil {
+		if err := e.write(uint32(ops.CMSGTimeSyncResp), response); err != nil {
 			return false, err
 		}
 		e.synced = true
 		e.checkReady()
-	case opcode.SMSGPong:
+	case op == ops.SMSGPong:
 		if len(body) != 4 {
 			return false, errors.New("invalid pong")
 		}
@@ -47,12 +46,12 @@ func (e *engine) handle(op uint16, body []byte) (bool, error) {
 			}
 			e.pongTimer.Reset(e.timing.pong)
 		}
-	case opcode.SMSGCharacterLoginFailed:
+	case op == ops.SMSGCharacterLoginFailed:
 		if len(body) != 1 {
 			return false, errors.New("invalid login rejection")
 		}
 		return false, &LoginError{Code: body[0]}
-	case opcode.SMSGLogoutResponse:
+	case op == ops.SMSGLogoutResponse:
 		if len(body) != 5 || body[4] > 1 {
 			return false, errors.New("invalid logout response")
 		}
@@ -67,18 +66,18 @@ func (e *engine) handle(op uint16, body []byte) (bool, error) {
 			op.err = &LogoutError{Reason: reason}
 			close(op.done)
 		}
-	case opcode.SMSGLogoutComplete:
+	case op == ops.SMSGLogoutComplete:
 		if len(body) != 0 {
 			return false, errors.New("invalid logout completion")
 		}
 		return true, nil
-	case opcode.SMSGWardenData:
+	case op == ops.SMSGWardenData:
 		reply, err := e.s.conn.WardenResponse(body)
 		if err != nil {
 			return false, err
 		}
 		if reply != nil {
-			return false, e.write(opcode.CMSGWardenData, reply)
+			return false, e.write(uint32(ops.CMSGWardenData), reply)
 		}
 	}
 	return false, nil

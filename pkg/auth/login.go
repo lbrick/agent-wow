@@ -38,26 +38,26 @@ func (c *Client) Login(ctx context.Context, username, password string) (*Session
 			return nil, fmt.Errorf("set authserver deadline: %w", err)
 		}
 	}
-	session, err := exchange(conn, username, password)
+	session, err := c.exchange(conn, username, password)
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("authenticate: %w", ctx.Err())
 	}
 	return session, err
 }
 
-func exchange(conn net.Conn, username, password string) (*Session, error) {
-	packet := logonChallenge(username)
+func (c *Client) exchange(conn net.Conn, username, password string) (*Session, error) {
+	packet := c.logonChallenge(username)
 	if address, ok := conn.LocalAddr().(*net.TCPAddr); ok {
 		copy(packet[29:33], address.IP.To4())
 	}
 	if _, err := io.Copy(conn, bytes.NewReader(packet)); err != nil {
 		return nil, fmt.Errorf("send logon challenge: %w", err)
 	}
-	c, err := readChallenge(conn)
+	challenge, err := readChallenge(conn)
 	if err != nil {
 		return nil, fmt.Errorf("logon challenge: %w", err)
 	}
-	p, err := newProof(username, password, c)
+	p, err := newProof(username, password, challenge)
 	if err != nil {
 		return nil, fmt.Errorf("create logon proof: %w", err)
 	}
@@ -90,14 +90,14 @@ func exchange(conn net.Conn, username, password string) (*Session, error) {
 	return &Session{Username: username, Key: p.key, AccountFlags: binary.LittleEndian.Uint32(response[20:24])}, nil
 }
 
-func logonChallenge(username string) []byte {
+func (c *Client) logonChallenge(username string) []byte {
 	packet := make([]byte, 34+len(username))
 	packet[0] = opcode.AuthLogonChallenge
-	packet[1] = 8
+	packet[1] = c.profile.AuthProtocol
 	binary.LittleEndian.PutUint16(packet[2:4], uint16(len(packet)-4))
 	copy(packet[4:8], "WoW\x00")
-	copy(packet[8:11], []byte{3, 3, 5})
-	binary.LittleEndian.PutUint16(packet[11:13], 12340)
+	copy(packet[8:11], c.profile.Version[:])
+	binary.LittleEndian.PutUint16(packet[11:13], c.profile.Build)
 	copy(packet[13:17], "68x\x00")
 	copy(packet[17:21], "niW\x00")
 	copy(packet[21:25], "SUne")

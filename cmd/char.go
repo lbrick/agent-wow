@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agent-wow/agent-wow/internal/config"
 	"github.com/agent-wow/agent-wow/pkg/auth"
 	"github.com/agent-wow/agent-wow/pkg/char"
 	"github.com/agent-wow/agent-wow/pkg/world"
@@ -63,7 +64,7 @@ func characterTarget(ctx context.Context) (auth.Realm, *auth.Session, error) {
 	if err != nil {
 		return auth.Realm{}, nil, err
 	}
-	client, err := auth.NewClient(authServerAddress())
+	client, err := auth.NewClient(authServerAddress(), config.Get().Profile())
 	if err != nil {
 		return auth.Realm{}, nil, err
 	}

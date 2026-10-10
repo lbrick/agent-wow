@@ -11,8 +11,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/agent-wow/agent-wow/pkg/opcode"
 )
 
 func (c *Client) List(ctx context.Context) ([]Character, error) {
@@ -29,10 +27,10 @@ func (c *Client) List(ctx context.Context) ([]Character, error) {
 }
 
 func (c *Client) list() ([]Character, error) {
-	if _, err := c.writePacket(opcode.CMSGCharEnum, nil); err != nil {
+	if _, err := c.writePacket(uint32(c.op().CMSGCharEnum), nil); err != nil {
 		return nil, err
 	}
-	body, err := c.waitPacket(opcode.SMSGCharEnum)
+	body, err := c.waitPacket(c.op().SMSGCharEnum)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +107,7 @@ func (c *Client) Delete(ctx context.Context, guid GUID) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return c.mutate("delete", opcode.CMSGCharDelete, opcode.SMSGCharDelete, 0x47, binary.LittleEndian.AppendUint64(nil, uint64(guid)), "", guid)
+			return c.mutate("delete", uint32(c.op().CMSGCharDelete), c.op().SMSGCharDelete, c.codes().deleteSuccess, binary.LittleEndian.AppendUint64(nil, uint64(guid)), "", guid)
 		}
 		return fmt.Errorf("character GUID %d is not in this account's current character list", guid)
 	})
@@ -125,10 +123,10 @@ func (c *Client) mutate(operation string, request uint32, response uint16, succe
 				err = errors.New("invalid mutation response length")
 			} else if result[0] == success {
 				return nil
-			} else if result[0] == 0x2e || result[0] == 0x46 {
+			} else if c.codes().interim(result[0]) {
 				err = errors.New("server did not return a final mutation result")
 			} else {
-				return &ServerError{Operation: operation, Code: result[0]}
+				return &ServerError{Operation: operation, Code: result[0], messages: c.codes().messages}
 			}
 		}
 	}

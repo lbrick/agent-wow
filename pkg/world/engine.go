@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"google.golang.org/grpc/status"
 )
 
@@ -46,12 +46,14 @@ func (e *engine) writeContext(ctx context.Context, op uint32, body []byte) error
 	}
 	_, err := e.s.conn.WritePacket(op, body)
 	if err == nil {
-		logPacket(e.s.logger, "write", op, len(body))
+		logPacket(e.s.logger, e.s.conn.Profile(), "write", op, len(body))
 	}
 	return err
 }
 
 func (e *engine) timestamp() uint32 { return e.s.Clock() }
+
+func (e *engine) op() protocol.Opcodes { return e.s.conn.Profile().Op }
 
 func (e *engine) publish() {
 	e.s.mu.Lock()
@@ -87,7 +89,7 @@ func (e *engine) loop(packets <-chan packet) error {
 		case <-e.s.modules.Done():
 			return e.s.modules.Err()
 		case <-login:
-			if err := e.write(opcode.CMSGPlayerLogin, binary.LittleEndian.AppendUint64(nil, e.s.state.Character.GUID)); err != nil {
+			if err := e.write(uint32(e.op().CMSGPlayerLogin), binary.LittleEndian.AppendUint64(nil, e.s.state.Character.GUID)); err != nil {
 				return err
 			}
 			e.s.loginStarted.Store(true)
@@ -107,7 +109,7 @@ func (e *engine) loop(packets <-chan packet) error {
 			if err != nil {
 				return fmt.Errorf("prepare logout: %w", err)
 			}
-			if err := e.write(opcode.CMSGLogoutRequest, nil); err != nil {
+			if err := e.write(uint32(e.op().CMSGLogoutRequest), nil); err != nil {
 				return err
 			}
 		case err := <-e.finalPackets:
@@ -158,7 +160,7 @@ func (e *engine) loop(packets <-chan packet) error {
 			body := binary.LittleEndian.AppendUint32(nil, e.pingSequence)
 			body = binary.LittleEndian.AppendUint32(body, e.latency)
 			e.pings[e.pingSequence] = now
-			if err := e.write(opcode.CMSGPing, body); err != nil {
+			if err := e.write(uint32(e.op().CMSGPing), body); err != nil {
 				return err
 			}
 			// Space actual sends apart, including after a temporarily blocked

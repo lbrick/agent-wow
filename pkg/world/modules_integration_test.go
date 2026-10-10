@@ -107,7 +107,7 @@ lifecycle:
 			go func() { defer right.Close(); peerErr <- integrationPeer(right, sent) }()
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
-			s, err := world.Enter(ctx, worldconn.New(left), world.Realm{ID: 1, Name: "Fixture"}, world.Character{GUID: 99, Name: "Mira"}, nil, world.Options{Modules: manager, ModuleTimeout: time.Minute, EntryTimeout: time.Second})
+			s, err := world.Enter(ctx, worldconn.New(left, nil), world.Realm{ID: 1, Name: "Fixture"}, world.Character{GUID: 99, Name: "Mira"}, nil, world.Options{Modules: manager, ModuleTimeout: time.Minute, EntryTimeout: time.Second})
 			if err != nil {
 				t.Fatal(err)
 			}

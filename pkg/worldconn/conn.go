@@ -1,4 +1,5 @@
-// Package worldconn owns the authenticated build-12340 worldserver transport.
+// Package worldconn owns the authenticated worldserver transport for the
+// client builds in package protocol.
 // One reader and one writer may operate concurrently. Writes (including cipher
 // advancement) are serialized; protocol dispatch belongs to the caller.
 package worldconn
@@ -20,7 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/agent-wow/agent-wow/pkg/auth"
-	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"github.com/agent-wow/agent-wow/pkg/warden"
 )
 
@@ -35,6 +36,7 @@ func (e *AuthError) Error() string {
 // Use Dial to obtain an authenticated connection. The zero value is not usable.
 type Conn struct {
 	conn       net.Conn
+	profile    *protocol.Profile
 	realm      auth.Realm
 	expansion  uint8
 	send, recv *rc4.Cipher
@@ -46,7 +48,16 @@ type Conn struct {
 
 // New wraps a raw connection before header encryption has started. It does not
 // authenticate or initialize Warden; use Dial for an authenticated worldserver.
-func New(conn net.Conn) *Conn                      { return &Conn{conn: conn} }
+// A nil profile selects protocol.Wrath.
+func New(conn net.Conn, profile *protocol.Profile) *Conn {
+	if profile == nil {
+		profile = protocol.Wrath
+	}
+	return &Conn{conn: conn, profile: profile}
+}
+
+// Profile returns the protocol profile this connection speaks.
+func (c *Conn) Profile() *protocol.Profile         { return c.profile }
 func (c *Conn) Expansion() uint8                   { return c.expansion }
 func (c *Conn) SetDeadline(t time.Time) error      { return c.conn.SetDeadline(t) }
 func (c *Conn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
@@ -64,6 +75,10 @@ func Dial(ctx context.Context, realm auth.Realm, session *auth.Session) (*Conn, 
 	if !realm.Selectable() {
 		return nil, fmt.Errorf("realm %q is %s", realm.Name, realm.Status())
 	}
+	profile, err := protocol.ForBuild(int(realm.Protocol()))
+	if err != nil {
+		return nil, fmt.Errorf("realm %q: %w", realm.Name, err)
+	}
 	host, port, err := net.SplitHostPort(realm.Address)
 	portNum, portErr := strconv.Atoi(port)
 	if err != nil || host == "" || portErr != nil || portNum < 1 || portNum > 65535 {
@@ -73,7 +88,7 @@ func Dial(ctx context.Context, realm auth.Realm, session *auth.Session) (*Conn, 
 	if err != nil {
 		return nil, fmt.Errorf("connect to realm %q: %w", realm.Name, err)
 	}
-	c := New(raw)
+	c := New(raw, profile)
 	c.realm = realm
 	deadline, _ := ctx.Deadline()
 	if err = c.SetDeadline(deadline); err != nil {
@@ -110,10 +125,10 @@ func (c *Conn) authenticate(session *auth.Session) error {
 		return err
 	}
 	// IP bans can be rejected before the server issues its challenge.
-	if op == opcode.SMSGAuthResponse && len(challenge) == 1 {
+	if op == c.profile.Op.SMSGAuthResponse && len(challenge) == 1 {
 		return &AuthError{Code: challenge[0]}
 	}
-	if op != opcode.SMSGAuthChallenge || len(challenge) != 40 {
+	if op != c.profile.Op.SMSGAuthChallenge || len(challenge) != 40 {
 		return errors.New("invalid realm authentication challenge")
 	}
 	var nonce [4]byte
@@ -139,13 +154,13 @@ func (c *Conn) authenticate(session *auth.Session) error {
 	body = binary.LittleEndian.AppendUint64(body, 0) // DosResponse
 	body = append(body, h.Sum(nil)...)
 	body = binary.LittleEndian.AppendUint32(body, 0) // Empty addon block
-	if _, err := c.WritePacket(opcode.CMSGAuthSession, body); err != nil {
+	if _, err := c.WritePacket(uint32(c.profile.Op.CMSGAuthSession), body); err != nil {
 		return err
 	}
 	c.send, c.recv = HeaderCipher(session.Key, true), HeaderCipher(session.Key, false)
 	c.warden = warden.New(session.Key)
 	for range 4096 {
-		body, err := c.waitPacket(opcode.SMSGAuthResponse)
+		body, err := c.waitPacket(c.profile.Op.SMSGAuthResponse)
 		if err != nil {
 			return fmt.Errorf("read authentication response (saved session may be stale): %w", err)
 		}
@@ -186,18 +201,18 @@ func (c *Conn) waitPacket(expected uint16) ([]byte, error) {
 		if op == expected {
 			return body, nil
 		}
-		if op == opcode.SMSGWardenData {
+		if op == c.profile.Op.SMSGWardenData {
 			reply, err := c.WardenResponse(body)
 			if err != nil {
 				return nil, err
 			}
 			if reply != nil {
-				if _, err := c.WritePacket(opcode.CMSGWardenData, reply); err != nil {
+				if _, err := c.WritePacket(uint32(c.profile.Op.CMSGWardenData), reply); err != nil {
 					return nil, err
 				}
 			}
 		}
-		if op == opcode.SMSGAuthResponse {
+		if op == c.profile.Op.SMSGAuthResponse {
 			if len(body) == 0 {
 				return nil, errors.New("empty authentication response")
 			}

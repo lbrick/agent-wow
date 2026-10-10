@@ -8,8 +8,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/agent-wow/agent-wow/pkg/opcode"
 )
 
 type appearanceProfile struct {
@@ -212,12 +210,12 @@ func (c *Client) Create(ctx context.Context, options CreateOptions) (CreateResul
 			a := result.Appearance
 			body := append([]byte(result.Name), 0)
 			body = append(body, byte(result.Race), byte(result.Class), byte(result.Gender), a.Skin, a.Face, a.HairStyle, a.HairColor, a.FacialHair, 0)
-			err = c.mutate("create", opcode.CMSGCharCreate, opcode.SMSGCharCreate, 0x2f, body, result.Name, 0)
+			err = c.mutate("create", uint32(c.op().CMSGCharCreate), c.op().SMSGCharCreate, c.codes().createSuccess, body, result.Name, 0)
 			if err == nil {
 				return nil
 			}
 			var rejection *ServerError
-			if options.Name != nil || attempt == 4 || !errors.As(err, &rejection) || rejection.Operation != "create" || !(rejection.Code == 0x32 || rejection.Code >= 0x58 && rejection.Code <= 0x67) {
+			if options.Name != nil || attempt == 4 || !errors.As(err, &rejection) || rejection.Operation != "create" || !c.codes().retryableName(rejection.Code) {
 				return err
 			}
 			result.Name = c.generatedName()

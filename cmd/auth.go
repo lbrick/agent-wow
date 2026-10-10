@@ -77,7 +77,7 @@ On first login, the first available realm from the authservers realm list will b
 				return err
 			}
 			address := authServerAddress()
-			authClient, err := auth.NewClient(address)
+			authClient, err := auth.NewClient(address, config.Get().Profile())
 			if err != nil {
 				return err
 			}
@@ -125,7 +125,7 @@ func newAuthStatusCommand() *cobra.Command {
 				return err
 			}
 			address := authServerAddress()
-			authClient, err := auth.NewClient(address)
+			authClient, err := auth.NewClient(address, config.Get().Profile())
 			if err != nil {
 				return err
 			}

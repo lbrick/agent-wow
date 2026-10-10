@@ -83,7 +83,7 @@ local RPC API for gameplay actions.`,
 				return err
 			}
 			defer listener.Close()
-			registry, err := moddisc.Load(config.Get().ModuleDir)
+			registry, err := moddisc.LoadFor(config.Get().ModuleDir, config.Get().Profile())
 			if err != nil {
 				return err
 			}

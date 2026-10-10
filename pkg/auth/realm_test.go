@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"io"
 	"net"
 	"reflect"
@@ -87,11 +88,12 @@ func TestRealmAvailability(t *testing.T) {
 		status string
 	}{
 		{Realm{}, "online"},
-		{Realm{Flags: RealmFlagSpecifyBuild, Build: 12340}, "online"},
+		{Realm{Flags: RealmFlagSpecifyBuild, Build: 12340, ClientBuild: 12340}, "online"},
+		{Realm{Flags: RealmFlagSpecifyBuild, Build: 5875, ClientBuild: 5875}, "online"},
 		{Realm{Flags: RealmFlagOffline}, "offline"},
 		{Realm{Flags: RealmFlagInvalid}, "invalid"},
 		{Realm{Locked: true}, "locked"},
-		{Realm{Flags: RealmFlagSpecifyBuild, Build: 8606}, "incompatible build"},
+		{Realm{Flags: RealmFlagSpecifyBuild, Build: 8606, ClientBuild: 12340}, "incompatible build"},
 		{Realm{Flags: RealmFlagOffline, Locked: true}, "offline, locked"},
 	} {
 		if tc.realm.Status() != tc.status || tc.realm.Selectable() != (tc.status == "online") {
@@ -122,7 +124,7 @@ func TestListRealmsUsesSavedSession(t *testing.T) {
 				}
 				return nil
 			})
-			client, err := NewClient(address)
+			client, err := NewClient(address, protocol.Wrath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +166,7 @@ func TestListRealmsCancellation(t *testing.T) {
 				_, err := io.Copy(io.Discard, conn)
 				return err
 			})
-			client, err := NewClient(address)
+			client, err := NewClient(address, protocol.Wrath)
 			if err != nil {
 				t.Fatal(err)
 			}

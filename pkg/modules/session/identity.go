@@ -6,4 +6,5 @@ type Identity struct {
 	CharacterName string
 	RealmID       uint8
 	RealmName     string
+	ClientBuild   uint16
 }

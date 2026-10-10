@@ -13,7 +13,6 @@ import (
 
 	"github.com/agent-wow/agent-wow/pkg/modules/runtime"
 	"github.com/agent-wow/agent-wow/pkg/modules/session"
-	"github.com/agent-wow/agent-wow/pkg/opcode"
 	"github.com/agent-wow/agent-wow/pkg/worldconn"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -110,7 +109,7 @@ func enter(ctx context.Context, conn *worldconn.Conn, realm Realm, character Cha
 	go s.run(ready, timing)
 	startup, endStartup := context.WithTimeout(ctx, opts.ModuleTimeout)
 	stopStartup := context.AfterFunc(lifetime, endStartup)
-	err := s.modules.Start(startup, modsession.Session{Identity: modsession.Identity{CharacterGUID: character.GUID, CharacterName: character.Name, RealmID: realm.ID, RealmName: realm.Name}, SendPacket: s.SendPacket, Clock: s.Clock})
+	err := s.modules.Start(startup, modsession.Session{Identity: modsession.Identity{CharacterGUID: character.GUID, CharacterName: character.Name, RealmID: realm.ID, RealmName: realm.Name, ClientBuild: conn.Profile().Build}, SendPacket: s.SendPacket, Clock: s.Clock})
 	endStartup()
 	stopStartup()
 	close(s.startupDone)
@@ -174,15 +173,12 @@ func (s *Session) SendPacket(ctx context.Context, op uint32, body []byte) error 
 	if err := ctx.Err(); err != nil {
 		return status.FromContextError(err).Err()
 	}
-	name := opcode.WorldName(op)
+	profile := s.conn.Profile()
+	name := profile.WorldName(op)
 	if !(strings.HasPrefix(name, "CMSG_") || strings.HasPrefix(name, "MSG_")) {
 		return status.Error(codes.InvalidArgument, "opcode must be client or bidirectional")
 	}
-	switch op {
-	case opcode.CMSGAuthSession, opcode.CMSGAuthSRP6Begin, opcode.CMSGAuthSRP6Proof, opcode.CMSGAuthSRP6Recode, opcode.CMSGRedirectionAuthProof,
-		opcode.CMSGPlayerLogin, opcode.CMSGCheatPlayerLogin, opcode.CMSGCheckLoginCriteria,
-		opcode.CMSGPing, opcode.CMSGKeepAlive, opcode.CMSGTimeSyncResp, opcode.CMSGWardenData,
-		opcode.CMSGPlayerLogout, opcode.CMSGLogoutRequest, opcode.CMSGLogoutCancel:
+	if profile.Reserved(op) {
 		return status.Error(codes.PermissionDenied, "opcode is owned by the session")
 	}
 	if len(body)+4 >= 10240 {
@@ -261,7 +257,7 @@ func (s *Session) run(ready chan struct{}, timing timings) {
 		for {
 			op, body, err := s.conn.ReadPacket()
 			if err == nil {
-				logPacket(s.logger, "read", uint32(op), len(body))
+				logPacket(s.logger, s.conn.Profile(), "read", uint32(op), len(body))
 			}
 			select {
 			case packets <- packet{op, body, err}:
