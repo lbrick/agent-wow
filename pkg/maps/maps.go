@@ -1,6 +1,8 @@
-// Package maps resolves map and zone IDs to stock WoW 3.3.5a (build 12340)
-// English labels. Zone IDs refer to AreaTable entries, including subzones.
-// The bundled data requires no client files or network access at runtime.
+// Package maps resolves map and zone IDs to stock English labels. The package
+// functions use WoW 3.3.5a (build 12340) tables; ForBuild selects a build's
+// tables, including WoW 1.12.1 (build 5875). Zone IDs refer to AreaTable
+// entries, including subzones. The bundled data requires no client files or
+// network access at runtime.
 package maps
 
 import "strconv"

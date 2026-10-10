@@ -1,14 +1,17 @@
-// Command charcatalog generates the stock build-12340 compatibility catalogue
-// from local reference files. It does not access the network or server internals.
+// Command charcatalog generates a build's character-creation compatibility
+// catalogue from local reference files. It does not access the network or
+// server internals.
 //
 // Run from the repository root:
 //
-//	./run client-data:fetch
-//	./run charcatalog:generate
+//	./run client-data:fetch [5875]
+//	./run charcatalog:generate [12340|5875]
 //
-// The tmp/client-data directory must contain CharSections.dbc, CharHairGeosets.dbc,
-// CharacterFacialHairStyles.dbc and playercreateinfo.sql. Only numeric creation
-// choices and source checksums are retained in pkg/char/profiles_gen.go.
+// For build 12340 the tmp/client-data directory must contain CharSections.dbc,
+// CharHairGeosets.dbc, CharacterFacialHairStyles.dbc and playercreateinfo.sql;
+// for build 5875 tmp/client-data-5875 holds the same tables from a cMaNGOS
+// Classic server and playercreateinfo.tsv. Only numeric creation choices and
+// source checksums are retained in the generated Go file.
 package main
 
 import (
@@ -27,7 +30,51 @@ import (
 	"github.com/agent-wow/agent-wow/tools/internal/clientdata"
 )
 
-const destination = "pkg/char/profiles_gen.go"
+// layout describes one build's reference files and generated catalogue.
+type layout struct {
+	build                       int
+	release, server             string
+	directory, source, revision string
+	destination, variable       string
+	facialFields                int
+	// sections maps the build's CharSections columns to the build-12340 order
+	// buildProfile reads; nil means the file already uses that order.
+	sections     func(row []uint32) []uint32
+	classes      string
+	parseClasses func([]byte) ([][2]uint32, error)
+	deathKnights bool
+	// pins verifies source checksums before generating; nil skips the check.
+	pins map[string]string
+}
+
+var layouts = map[string]layout{
+	"12340": {
+		build: 12340, release: "WoW 3.3.5a", server: "AzerothCore",
+		directory: clientdata.Directory, source: clientdata.ReleaseURL, revision: clientdata.CoreRevision,
+		destination: "pkg/char/profiles_gen.go", variable: "catalogue", facialFields: 8,
+		classes: "playercreateinfo.sql", parseClasses: parseRaceClasses, deathKnights: true,
+	},
+	"5875": {
+		build: 5875, release: "WoW 1.12.1", server: "cMaNGOS Classic",
+		directory: clientdata.ClassicDirectory, source: "the server's DataDir/dbc and playercreateinfo table", revision: clientdata.ClassicCoreRevision,
+		destination: "pkg/char/profiles_5875_gen.go", variable: "classicCatalogue", facialFields: 9,
+		// 1.12: ID, Race, Sex, BaseSection, Variation, Color, Texture[3], Flags.
+		// Flag 1 is SECTION_FLAG_UNAVAILABLE (mangos-classic GetCharSectionEntry),
+		// the inverse of build 12340's playable bit.
+		sections: func(r []uint32) []uint32 {
+			playable := uint32(0)
+			if r[9]&1 == 0 {
+				playable = 1
+			}
+			return []uint32{r[0], r[1], r[2], r[3], r[6], r[7], r[8], playable, r[4], r[5]}
+		},
+		classes: "playercreateinfo.tsv", parseClasses: parseRaceClassTable,
+		pins: map[string]string{
+			"CharSections.dbc": clientdata.ClassicSectionsSHA256, "CharHairGeosets.dbc": clientdata.ClassicHairSHA256,
+			"CharacterFacialHairStyles.dbc": clientdata.ClassicFacialSHA256, "playercreateinfo.tsv": clientdata.ClassicClassesSHA256,
+		},
+	},
+}
 
 type sourceHashes struct {
 	Sections string
@@ -37,6 +84,7 @@ type sourceHashes struct {
 }
 
 type metadata struct {
+	layout       layout
 	Build        int
 	Source       string
 	CoreRevision string
@@ -54,16 +102,21 @@ type profile struct {
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("Usage: ./run charcatalog:generate\nReads tmp/client-data and writes pkg/char/profiles_gen.go. Run './run client-data:fetch' first.")
+		fmt.Println("Usage: ./run charcatalog:generate [12340|5875]\nReads tmp/client-data (12340, default) or tmp/client-data-5875 (5875) and writes the build's pkg/char catalogue. Run './run client-data:fetch [5875]' first.")
 		return
 	}
-	if len(os.Args) != 1 {
-		fmt.Fprintln(os.Stderr, "Usage: ./run charcatalog:generate")
+	build := "12340"
+	if len(os.Args) == 2 {
+		build = os.Args[1]
+	}
+	l, ok := layouts[build]
+	if !ok || len(os.Args) > 2 {
+		fmt.Fprintln(os.Stderr, "Usage: ./run charcatalog:generate [12340|5875]")
 		os.Exit(2)
 	}
-	data, pairs, profiles, err := generate(clientdata.Directory)
+	data, pairs, profiles, err := generateLayout(l.directory, l)
 	if err == nil {
-		err = writeCatalogue(destination, data)
+		err = writeCatalogue(l.destination, data)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "generate character catalogue:", err)
@@ -73,13 +126,20 @@ func main() {
 }
 
 func generate(directory string) ([]byte, int, int, error) {
-	info := metadata{Build: 12340, Source: clientdata.ReleaseURL, CoreRevision: clientdata.CoreRevision}
+	return generateLayout(directory, layouts["12340"])
+}
+
+func generateLayout(directory string, l layout) ([]byte, int, int, error) {
+	info := metadata{Build: l.build, Source: l.source, CoreRevision: l.revision, layout: l}
 	read := func(name string, hash *string) ([]byte, error) {
 		data, err := clientdata.Read(directory, name)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
 		}
 		*hash = fmt.Sprintf("%x", sha256.Sum256(data))
+		if want, ok := l.pins[name]; ok && *hash != want {
+			return nil, fmt.Errorf("%s checksum mismatch: got %s, want %s", name, *hash, want)
+		}
 		return data, nil
 	}
 	readTable := func(name string, fields int, hash *string) ([][]uint32, error) {
@@ -97,19 +157,24 @@ func generate(directory string) ([]byte, int, int, error) {
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	if l.sections != nil {
+		for i, row := range sections {
+			sections[i] = l.sections(row)
+		}
+	}
 	hair, err := readTable("CharHairGeosets.dbc", 6, &info.SHA256.Hair)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	facial, err := readTable("CharacterFacialHairStyles.dbc", 8, &info.SHA256.Facial)
+	facial, err := readTable("CharacterFacialHairStyles.dbc", l.facialFields, &info.SHA256.Facial)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	sql, err := read("playercreateinfo.sql", &info.SHA256.Classes)
+	sql, err := read(l.classes, &info.SHA256.Classes)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	info.RaceClasses, err = parseRaceClasses(sql)
+	info.RaceClasses, err = l.parseClasses(sql)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -122,6 +187,9 @@ func generate(directory string) ([]byte, int, int, error) {
 		previousRace = pair[0]
 		for gender := uint32(0); gender < 2; gender++ {
 			for _, dk := range []bool{false, true} {
+				if dk && !l.deathKnights {
+					continue
+				}
 				p, err := buildProfile(pair[0], gender, dk, sections, hair, facial)
 				if err != nil {
 					return nil, 0, 0, err
@@ -177,6 +245,30 @@ func parseRaceClasses(sql []byte) ([][2]uint32, error) {
 	}
 	if len(unique) < 60 {
 		return nil, fmt.Errorf("expected at least 60 race/class pairs in playercreateinfo.sql, got %d", len(unique))
+	}
+	return sortedPairs(unique), nil
+}
+
+// parseRaceClassTable reads "race<TAB>class" lines from a playercreateinfo query.
+func parseRaceClassTable(table []byte) ([][2]uint32, error) {
+	unique := make(map[[2]uint32]bool)
+	for _, line := range bytes.Split(bytes.TrimSpace(table), []byte("\n")) {
+		fields := bytes.Fields(line)
+		if len(fields) != 2 {
+			return nil, fmt.Errorf("invalid playercreateinfo line %q", line)
+		}
+		var pair [2]uint32
+		for i := range pair {
+			n, err := strconv.ParseUint(string(fields[i]), 10, 8)
+			if err != nil || n == 0 {
+				return nil, fmt.Errorf("invalid race/class ID %q in playercreateinfo", fields[i])
+			}
+			pair[i] = uint32(n)
+		}
+		unique[pair] = true
+	}
+	if len(unique) < 40 {
+		return nil, fmt.Errorf("expected at least 40 race/class pairs in playercreateinfo, got %d", len(unique))
 	}
 	return sortedPairs(unique), nil
 }
@@ -257,18 +349,26 @@ func buildProfile(race, gender uint32, dk bool, sections, hairGeo, facialGeo [][
 
 func encodeCatalogue(info metadata, profiles []profile) ([]byte, error) {
 	var out bytes.Buffer
-	fmt.Fprintln(&out, "// Code generated by ./run charcatalog:generate; DO NOT EDIT.")
-	fmt.Fprintf(&out, "// WoW 3.3.5a, build %d.\n", info.Build)
+	l := info.layout
+	if l.variable == "" {
+		l = layouts["12340"]
+	}
+	command := "./run charcatalog:generate"
+	if l.build != 12340 {
+		command += fmt.Sprintf(" %d", l.build)
+	}
+	fmt.Fprintf(&out, "// Code generated by %s; DO NOT EDIT.\n", command)
+	fmt.Fprintf(&out, "// %s, build %d.\n", l.release, info.Build)
 	fmt.Fprintln(&out, "// Source: "+info.Source)
-	fmt.Fprintln(&out, "// AzerothCore revision: "+info.CoreRevision)
+	fmt.Fprintf(&out, "// %s revision: %s\n", l.server, info.CoreRevision)
 	fmt.Fprintln(&out, "// SHA-256:")
 	fmt.Fprintln(&out, "// CharSections.dbc: "+info.SHA256.Sections)
 	fmt.Fprintln(&out, "// CharHairGeosets.dbc: "+info.SHA256.Hair)
 	fmt.Fprintln(&out, "// CharacterFacialHairStyles.dbc: "+info.SHA256.Facial)
-	fmt.Fprintln(&out, "// playercreateinfo.sql: "+info.SHA256.Classes)
+	fmt.Fprintf(&out, "// %s: %s\n", l.classes, info.SHA256.Classes)
 	fmt.Fprintln(&out, "\npackage char")
 	fmt.Fprintf(&out, "\n// %d race/class pairs and %d appearance profiles.\n", len(info.RaceClasses), len(profiles))
-	fmt.Fprintf(&out, "var catalogue = creationCatalogue{\nBuild: %d,\nRaceClasses: [][2]uint8{\n", info.Build)
+	fmt.Fprintf(&out, "var %s = creationCatalogue{\nBuild: %d,\nRaceClasses: [][2]uint8{\n", l.variable, info.Build)
 	for _, pair := range info.RaceClasses {
 		fmt.Fprintf(&out, "{%d, %d},\n", pair[0], pair[1])
 	}
