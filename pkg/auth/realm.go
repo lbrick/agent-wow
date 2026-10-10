@@ -76,22 +76,13 @@ func (r Realm) Selectable() bool { return r.Status() == "online" }
 
 // ListRealms reconnects using a saved session and fetches the current realm list
 // without a password or a new session key. Callers should set a context deadline.
+// cMaNGOS Classic's realmd does not serve it after a reconnect; use LoginRealms
+// for build 5875.
 func (c *Client) ListRealms(ctx context.Context, session *Session) ([]Realm, error) {
 	var realms []Realm
 	err := c.withSession(ctx, session, func(conn net.Conn) error {
-		// REALM_LIST opcode followed by four reserved bytes.
-		if _, err := io.Copy(conn, bytes.NewReader([]byte{opcode.AuthRealmList, 0, 0, 0, 0})); err != nil {
-			return fmt.Errorf("send realm list request: %w", err)
-		}
 		var err error
-		if c.profile.Build == protocol.BuildClassic {
-			realms, err = readClassicRealms(conn)
-		} else {
-			realms, err = readRealms(conn)
-		}
-		for i := range realms {
-			realms[i].ClientBuild = c.profile.Build
-		}
+		realms, err = c.requestRealms(conn)
 		return err
 	})
 	if err != nil {
@@ -102,6 +93,26 @@ func (c *Client) ListRealms(ctx context.Context, session *Session) ([]Realm, err
 
 // WoW 3.3.5a framing, as emitted by AzerothCore's AuthSession::RealmListCallback:
 // https://github.com/azerothcore/azerothcore-wotlk/blob/master/src/server/apps/authserver/Server/AuthSession.cpp
+// requestRealms sends REALM_LIST on an authenticated connection and reads the
+// reply in the profile's format.
+func (c *Client) requestRealms(conn net.Conn) ([]Realm, error) {
+	// REALM_LIST opcode followed by four reserved bytes.
+	if _, err := io.Copy(conn, bytes.NewReader([]byte{opcode.AuthRealmList, 0, 0, 0, 0})); err != nil {
+		return nil, fmt.Errorf("send realm list request: %w", err)
+	}
+	var realms []Realm
+	var err error
+	if c.profile.Build == protocol.BuildClassic {
+		realms, err = readClassicRealms(conn)
+	} else {
+		realms, err = readRealms(conn)
+	}
+	for i := range realms {
+		realms[i].ClientBuild = c.profile.Build
+	}
+	return realms, err
+}
+
 func readRealms(r io.Reader) ([]Realm, error) {
 	var header [3]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {

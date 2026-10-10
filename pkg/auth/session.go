@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 // Session holds the verified credentials for a subsequent worldserver login.
@@ -92,6 +93,12 @@ func (c *Client) reconnect(conn net.Conn, session *Session) error {
 	copy(packet[1:17], nonce[:])
 	copy(packet[17:37], proof[:])
 	copy(packet[37:57], version[:])
+	if c.profile.Build == protocol.BuildClassic {
+		// mangos-classic _HandleReconnectProof reads sizeof(sAuthReconnectProof_C),
+		// whose first field is cmd, after its dispatcher already consumed the
+		// command byte. Repeat the command so R1, R2 and R3 land where it reads them.
+		packet = append([]byte{opcode.AuthReconnectProof}, packet...)
+	}
 	if _, err := io.Copy(conn, bytes.NewReader(packet)); err != nil {
 		return fmt.Errorf("send reconnect proof: %w", err)
 	}

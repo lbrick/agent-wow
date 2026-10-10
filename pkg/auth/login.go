@@ -20,6 +20,28 @@ import (
 // proof before returning a session. The connection is closed on return or context
 // cancellation. Callers should set a context deadline to bound the whole login.
 func (c *Client) Login(ctx context.Context, username, password string) (*Session, error) {
+	return c.login(ctx, username, password, nil)
+}
+
+// LoginRealms logs in and fetches the realm list on the same connection,
+// returning the new session and the realms. cMaNGOS Classic's realmd stops
+// reading after a reconnect proof (_HandleReconnectProof returns without
+// ProcessIncomingData), so build 5875 can list realms only this way. Each call
+// replaces the server's session key; callers must save the returned session.
+func (c *Client) LoginRealms(ctx context.Context, username, password string) (*Session, []Realm, error) {
+	var realms []Realm
+	session, err := c.login(ctx, username, password, func(conn net.Conn) error {
+		var err error
+		realms, err = c.requestRealms(conn)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return session, realms, nil
+}
+
+func (c *Client) login(ctx context.Context, username, password string, request func(net.Conn) error) (*Session, error) {
 	if len(username) == 0 || len(username) > 17 || !utf8.ValidString(username) || strings.ContainsAny(username, "\x00\r\n") {
 		return nil, errors.New("username must contain 1 to 17 UTF-8 bytes without NUL or newlines")
 	}
@@ -40,6 +62,9 @@ func (c *Client) Login(ctx context.Context, username, password string) (*Session
 		}
 	}
 	session, err := c.exchange(conn, username, password)
+	if err == nil && request != nil {
+		err = request(conn)
+	}
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("authenticate: %w", ctx.Err())
 	}

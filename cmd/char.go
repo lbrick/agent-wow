@@ -60,15 +60,11 @@ func characterTarget(ctx context.Context) (auth.Realm, *auth.Session, error) {
 	if selected == nil {
 		return auth.Realm{}, nil, errors.New("no realm selected; run 'agent-wow auth login' or 'agent-wow realm set <id|name>'")
 	}
-	session, err := loadSavedSession()
-	if err != nil {
-		return auth.Realm{}, nil, err
-	}
 	client, err := auth.NewClient(authServerAddress(), config.Get().Profile())
 	if err != nil {
 		return auth.Realm{}, nil, err
 	}
-	realms, err := client.ListRealms(ctx, session)
+	session, realms, err := sessionRealms(ctx, client)
 	if err != nil {
 		return auth.Realm{}, nil, fmt.Errorf("fetch selected realm: %w; if the saved session is invalid, run 'agent-wow auth login'", err)
 	}

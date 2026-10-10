@@ -38,6 +38,54 @@ func classicServerKey(s [32]byte) [40]byte {
 }
 
 func TestClassicLogin(t *testing.T) {
+	address, serverKey := serveClassicLogon(t, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	client, err := NewClient(address, protocol.Classic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := client.Login(ctx, "player", "password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Key != *serverKey || session.AccountFlags != 0 || session.Username != "PLAYER" {
+		t.Fatalf("session = %+v, want the server's key and no account flags", session)
+	}
+}
+
+func TestClassicLoginRealms(t *testing.T) {
+	address, serverKey := serveClassicLogon(t, func(conn net.Conn) error {
+		var request [5]byte
+		if _, err := io.ReadFull(conn, request[:]); err != nil {
+			return err
+		}
+		if request != [5]byte{0x10} {
+			return fmt.Errorf("invalid realm list request %x", request)
+		}
+		_, err := conn.Write(classicRealmList(classicRealmRecord(1, 0, "MaNGOS", "127.0.0.1:8085", 0, 1, 1)))
+		return err
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	client, err := NewClient(address, protocol.Classic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, realms, err := client.LoginRealms(ctx, "player", "password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Key != *serverKey || len(realms) != 1 || realms[0].Name != "MaNGOS" || realms[0].ClientBuild != protocol.BuildClassic {
+		t.Fatalf("LoginRealms = %+v, %+v", session, realms)
+	}
+}
+
+// serveClassicLogon runs a cMaNGOS Classic logon for PLAYER:PASSWORD, then
+// next on the same connection. It returns the address and the server's key,
+// which is set once the client's proof has been checked.
+func serveClassicLogon(t *testing.T, next func(net.Conn) error) (string, *[40]byte) {
+	t.Helper()
 	// A salt with a high zero byte exercises the trimmed hashing.
 	var c challenge
 	for i := range c.salt {
@@ -55,7 +103,7 @@ func TestClassicLogin(t *testing.T) {
 	public := new(big.Int).Add(new(big.Int).Mul(big.NewInt(3), v), new(big.Int).Exp(big.NewInt(7), b, modulus))
 	c.public = toLittleEndian(public.Mod(public, modulus))
 
-	var serverKey [40]byte
+	serverKey := new([40]byte)
 	address := serve(t, func(conn net.Conn) error {
 		var request [40]byte
 		if _, err := io.ReadFull(conn, request[:]); err != nil {
@@ -75,7 +123,7 @@ func TestClassicLogin(t *testing.T) {
 		a := proof[1:33]
 		u := digest(classicServerTrim(a), classicServerTrim(c.public[:]))
 		base := new(big.Int).Mul(fromLittleEndian(a), new(big.Int).Exp(v, fromLittleEndian(u[:]), modulus))
-		serverKey = classicServerKey(toLittleEndian(new(big.Int).Exp(base, b, modulus)))
+		*serverKey = classicServerKey(toLittleEndian(new(big.Int).Exp(base, b, modulus)))
 		n := toLittleEndian(modulus)
 		group, gHash := digest(n[:]), digest([]byte{7})
 		for i := range group {
@@ -91,7 +139,56 @@ func TestClassicLogin(t *testing.T) {
 		m2 := digest(classicServerTrim(a), classicServerTrim(m1[:]), classicServerTrim(serverKey[:]))
 		// sAuthLogonProof_S_BUILD_6005: cmd, error, M2, LoginFlags.
 		response := append([]byte{1, 0}, m2[:]...)
-		_, err := conn.Write(binary.LittleEndian.AppendUint32(response, 0))
+		if _, err := conn.Write(binary.LittleEndian.AppendUint32(response, 0)); err != nil || next == nil {
+			return err
+		}
+		return next(conn)
+	})
+	return address, serverKey
+}
+
+func TestClassicReconnectProofLayout(t *testing.T) {
+	session := &Session{Username: "PLAYER"}
+	for i := range session.Key {
+		session.Key[i] = byte(i + 1)
+	}
+	session.Key[39] = 0
+	var nonce [16]byte
+	for i := range nonce {
+		nonce[i] = byte(0xa0 + i)
+	}
+	nonce[15] = 0 // the server hashes it trimmed
+	address := serve(t, func(conn net.Conn) error {
+		var header [4]byte
+		if _, err := io.ReadFull(conn, header[:]); err != nil {
+			return err
+		}
+		if header[0] != 2 || header[1] != 3 {
+			return fmt.Errorf("invalid reconnect challenge header %x", header)
+		}
+		if _, err := io.ReadFull(conn, make([]byte, binary.LittleEndian.Uint16(header[2:]))); err != nil {
+			return err
+		}
+		if _, err := conn.Write(append(append([]byte{2, 0}, nonce[:]...), make([]byte, 16)...)); err != nil {
+			return err
+		}
+		// mangos-classic: the dispatcher reads the command byte, then
+		// _HandleReconnectProof reads sizeof(sAuthReconnectProof_C), which
+		// starts with its own cmd field.
+		var cmd [1]byte
+		var proof [58]byte
+		if _, err := io.ReadFull(conn, cmd[:]); err != nil {
+			return err
+		}
+		if _, err := io.ReadFull(conn, proof[:]); err != nil {
+			return err
+		}
+		r1 := proof[1:17]
+		want := digest([]byte("PLAYER"), classicServerTrim(r1), classicServerTrim(nonce[:]), classicServerTrim(session.Key[:]))
+		if cmd[0] != 3 || !bytes.Equal(proof[17:37], want[:]) {
+			return fmt.Errorf("reconnect proof misaligned or wrong: cmd %d", cmd[0])
+		}
+		_, err := conn.Write([]byte{3, 0, 0, 0})
 		return err
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -100,12 +197,8 @@ func TestClassicLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := client.Login(ctx, "player", "password")
-	if err != nil {
+	if err := client.CheckSession(ctx, session); err != nil {
 		t.Fatal(err)
-	}
-	if session.Key != serverKey || session.AccountFlags != 0 || session.Username != "PLAYER" {
-		t.Fatalf("session = %+v, want the server's key and no account flags", session)
 	}
 }
 
