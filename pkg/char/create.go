@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 type appearanceProfile struct {
@@ -108,7 +110,11 @@ func (c *Client) resolve(o CreateOptions, characters []Character) (CreateResult,
 		hair   [][3]uint8
 	}
 	var candidates []candidate
-	for _, pair := range catalogue.RaceClasses {
+	cat := catalogue
+	if c.wire != nil && c.wire.Profile().Build == protocol.BuildClassic {
+		cat = classicCatalogue
+	}
+	for _, pair := range cat.RaceClasses {
 		race, class := Race(pair[0]), Class(pair[1])
 		if !matches(o.Race, race) || !matches(o.Class, class) {
 			continue
@@ -122,7 +128,7 @@ func (c *Client) resolve(o CreateOptions, characters []Character) (CreateResult,
 		if o.Race == nil && (c.realm.Type == 1 || c.realm.Type == 8) && existingFaction != 0 && faction(race) != existingFaction {
 			continue
 		}
-		for _, p := range catalogue.Profiles {
+		for _, p := range cat.Profiles {
 			if p.Race != race || p.DeathKnight != (class == ClassDeathKnight) || !matches(o.Gender, p.Gender) {
 				continue
 			}

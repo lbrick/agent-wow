@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 // Login performs a challenge/proof exchange and verifies the server's
@@ -57,7 +58,7 @@ func (c *Client) exchange(conn net.Conn, username, password string) (*Session, e
 	if err != nil {
 		return nil, fmt.Errorf("logon challenge: %w", err)
 	}
-	p, err := newProof(username, password, challenge)
+	p, err := newProofVariant(username, password, challenge, c.srp())
 	if err != nil {
 		return nil, fmt.Errorf("create logon proof: %w", err)
 	}
@@ -80,14 +81,23 @@ func (c *Client) exchange(conn net.Conn, username, password string) (*Session, e
 	if header[1] != 0 {
 		return nil, fmt.Errorf("logon proof: %w", authError(header[1]))
 	}
-	var response [30]byte // M2, account flags, survey ID, login flags.
-	if _, err := io.ReadFull(conn, response[:]); err != nil {
+	// 12340: M2, account flags, survey ID, login flags. 5875
+	// (sAuthLogonProof_S_BUILD_6005): M2 and login flags only.
+	response := make([]byte, 30)
+	if c.profile.Build == protocol.BuildClassic {
+		response = response[:24]
+	}
+	if _, err := io.ReadFull(conn, response); err != nil {
 		return nil, fmt.Errorf("read logon proof: %w", err)
 	}
 	if subtle.ConstantTimeCompare(response[:20], p.server[:]) != 1 {
 		return nil, errors.New("authserver proof verification failed")
 	}
-	return &Session{Username: username, Key: p.key, AccountFlags: binary.LittleEndian.Uint32(response[20:24])}, nil
+	var accountFlags uint32
+	if c.profile.Build != protocol.BuildClassic {
+		accountFlags = binary.LittleEndian.Uint32(response[20:24])
+	}
+	return &Session{Username: username, Key: p.key, AccountFlags: accountFlags}, nil
 }
 
 func (c *Client) logonChallenge(username string) []byte {
@@ -167,7 +177,7 @@ func authError(code byte) error {
 		0x06: "account is already online",
 		0x07: "no game time remaining",
 		0x08: "authserver database is busy",
-		0x09: "client version rejected (requires WoW 3.3.5a build 12340 without custom integrity checks)",
+		0x09: "client version rejected (check client_build matches the server's accepted builds; custom integrity checks are unsupported)",
 		0x0a: "client update required",
 		0x0b: "invalid server",
 		0x0c: "account is suspended",
@@ -191,4 +201,12 @@ func upperLatin(value string) string {
 		}
 		return r
 	}, value)
+}
+
+// srp returns how the profile's server encodes SRP6 values in its hashes.
+func (c *Client) srp() srpVariant {
+	if c.profile.Build == protocol.BuildClassic {
+		return classicSRP
+	}
+	return azerothSRP
 }

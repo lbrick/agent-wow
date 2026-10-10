@@ -6,13 +6,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"io"
 	"math/big"
 	"net"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 func TestLogin(t *testing.T) {

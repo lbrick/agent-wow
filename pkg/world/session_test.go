@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"github.com/agent-wow/agent-wow/pkg/worldconn"
 )
 
@@ -387,5 +388,27 @@ func TestExpiredPongDoesNotRenewLiveness(t *testing.T) {
 	case <-timer.C:
 	case <-time.After(20 * time.Millisecond):
 		t.Fatal("expired pong renewed the watchdog")
+	}
+}
+
+func TestClassicReadyWithoutTimeSync(t *testing.T) {
+	ready := make(chan struct{})
+	s := &Session{conn: worldconn.New(nil, protocol.Classic)}
+	e := engine{s: s, ready: ready, phase: EnteringWorld, synced: !protocol.Classic.TimeSync}
+	verify := make([]byte, 20)
+	if _, err := e.handle(protocol.Classic.Op.SMSGLoginVerifyWorld, verify); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ready:
+	default:
+		t.Fatal("1.12 session did not become ready on SMSG_LOGIN_VERIFY_WORLD")
+	}
+	if e.phase != InWorld {
+		t.Fatalf("phase = %v", e.phase)
+	}
+	// 0x390 is SMSG_TIME_SYNC_REQ in 3.3.5a and an unrelated packet in 1.12.
+	if _, err := e.handle(0x390, []byte{1}); err != nil {
+		t.Fatalf("1.12 handled a 3.3.5a time-sync opcode: %v", err)
 	}
 }

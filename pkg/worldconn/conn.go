@@ -7,7 +7,6 @@ package worldconn
 import (
 	"context"
 	"crypto/rand"
-	"crypto/rc4"
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
@@ -39,7 +38,7 @@ type Conn struct {
 	profile    *protocol.Profile
 	realm      auth.Realm
 	expansion  uint8
-	send, recv *rc4.Cipher
+	send, recv headerCipher
 	writeMu    sync.Mutex
 	closeOnce  sync.Once
 	closeErr   error
@@ -56,8 +55,14 @@ func New(conn net.Conn, profile *protocol.Profile) *Conn {
 	return &Conn{conn: conn, profile: profile}
 }
 
-// Profile returns the protocol profile this connection speaks.
-func (c *Conn) Profile() *protocol.Profile         { return c.profile }
+// Profile returns the protocol profile this connection speaks; a Conn built
+// without one speaks protocol.Wrath.
+func (c *Conn) Profile() *protocol.Profile {
+	if c.profile == nil {
+		return protocol.Wrath
+	}
+	return c.profile
+}
 func (c *Conn) Expansion() uint8                   { return c.expansion }
 func (c *Conn) SetDeadline(t time.Time) error      { return c.conn.SetDeadline(t) }
 func (c *Conn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
@@ -125,10 +130,13 @@ func (c *Conn) authenticate(session *auth.Session) error {
 		return err
 	}
 	// IP bans can be rejected before the server issues its challenge.
-	if op == c.profile.Op.SMSGAuthResponse && len(challenge) == 1 {
+	if op == c.Profile().Op.SMSGAuthResponse && len(challenge) == 1 {
 		return &AuthError{Code: challenge[0]}
 	}
-	if op != c.profile.Op.SMSGAuthChallenge || len(challenge) != 40 {
+	if op == c.Profile().Op.SMSGAuthChallenge && c.Profile().Build == protocol.BuildClassic {
+		return c.authenticateClassic(session, challenge)
+	}
+	if op != c.Profile().Op.SMSGAuthChallenge || len(challenge) != 40 {
 		return errors.New("invalid realm authentication challenge")
 	}
 	var nonce [4]byte
@@ -154,13 +162,13 @@ func (c *Conn) authenticate(session *auth.Session) error {
 	body = binary.LittleEndian.AppendUint64(body, 0) // DosResponse
 	body = append(body, h.Sum(nil)...)
 	body = binary.LittleEndian.AppendUint32(body, 0) // Empty addon block
-	if _, err := c.WritePacket(uint32(c.profile.Op.CMSGAuthSession), body); err != nil {
+	if _, err := c.WritePacket(uint32(c.Profile().Op.CMSGAuthSession), body); err != nil {
 		return err
 	}
 	c.send, c.recv = HeaderCipher(session.Key, true), HeaderCipher(session.Key, false)
 	c.warden = warden.New(session.Key)
 	for range 4096 {
-		body, err := c.waitPacket(c.profile.Op.SMSGAuthResponse)
+		body, err := c.waitPacket(c.Profile().Op.SMSGAuthResponse)
 		if err != nil {
 			return fmt.Errorf("read authentication response (saved session may be stale): %w", err)
 		}
@@ -201,18 +209,21 @@ func (c *Conn) waitPacket(expected uint16) ([]byte, error) {
 		if op == expected {
 			return body, nil
 		}
-		if op == c.profile.Op.SMSGWardenData {
+		if op == c.Profile().Op.SMSGWardenData && !c.Profile().Warden {
+			return nil, ErrWardenUnsupported
+		}
+		if op == c.Profile().Op.SMSGWardenData {
 			reply, err := c.WardenResponse(body)
 			if err != nil {
 				return nil, err
 			}
 			if reply != nil {
-				if _, err := c.WritePacket(uint32(c.profile.Op.CMSGWardenData), reply); err != nil {
+				if _, err := c.WritePacket(uint32(c.Profile().Op.CMSGWardenData), reply); err != nil {
 					return nil, err
 				}
 			}
 		}
-		if op == c.profile.Op.SMSGAuthResponse {
+		if op == c.Profile().Op.SMSGAuthResponse {
 			if len(body) == 0 {
 				return nil, errors.New("empty authentication response")
 			}
@@ -228,6 +239,9 @@ func (c *Conn) waitPacket(expected uint16) ([]byte, error) {
 // protocol owner must call it sequentially and send any returned payload as
 // CMSG_WARDEN_DATA using its normal write deadline. ReadPacket never writes.
 func (c *Conn) WardenResponse(body []byte) ([]byte, error) {
+	if !c.Profile().Warden {
+		return nil, ErrWardenUnsupported
+	}
 	if c.warden == nil {
 		return nil, errors.New("Warden received before authentication")
 	}

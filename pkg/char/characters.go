@@ -11,6 +11,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 func (c *Client) List(ctx context.Context) ([]Character, error) {
@@ -34,17 +36,31 @@ func (c *Client) list() ([]Character, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.wire.Profile().Build == protocol.BuildClassic {
+		return decodeClassicCharacters(body)
+	}
 	return decodeCharacters(body)
 }
 
 // Player::BuildEnumData emits every field, including the 23 nine-byte
 // equipment/bag display slots. Consume the complete record, not just CLI fields.
-func decodeCharacters(body []byte) ([]Character, error) {
+func decodeCharacters(body []byte) ([]Character, error) { return decodeEnum(body, 261) }
+
+// decodeClassicCharacters reads the build-5875 record (mangos-classic
+// Player::BuildEnumData): the shared fields, then guild, flags, first login,
+// pet display/level/family and 20 five-byte equipment slots, 150 bytes after
+// the name.
+func decodeClassicCharacters(body []byte) ([]Character, error) { return decodeEnum(body, 150) }
+
+// decodeEnum reads SMSG_CHAR_ENUM records whose fixed part after the name is
+// tailSize bytes. The first 29 bytes (appearance, level, zone, map and
+// position) share one layout in every supported build.
+func decodeEnum(body []byte, tailSize int) ([]Character, error) {
 	if len(body) < 1 {
 		return nil, errors.New("empty character list response")
 	}
 	count := int(body[0])
-	if count > (len(body)-1)/270 {
+	if count > (len(body)-1)/(9+tailSize) {
 		return nil, errors.New("invalid character count")
 	}
 	r := bytes.NewBuffer(body[1:])
@@ -63,8 +79,8 @@ func decodeCharacters(body []byte) ([]Character, error) {
 		if name == "" || !utf8.ValidString(name) || strings.ContainsFunc(name, unicode.IsControl) || utf8.RuneCountInString(name) > 12 {
 			return nil, errors.New("invalid character name in response")
 		}
-		var tail [261]byte
-		if _, err := io.ReadFull(r, tail[:]); err != nil {
+		tail := make([]byte, tailSize)
+		if _, err := io.ReadFull(r, tail); err != nil {
 			return nil, fmt.Errorf("truncated character record: %w", err)
 		}
 		ch := Character{GUID: GUID(binary.LittleEndian.Uint64(guid[:])), Name: name,

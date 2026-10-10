@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 const MaxPacketSize = 1 << 20
@@ -38,7 +40,9 @@ func (c *Conn) ReadPacket() (uint16, []byte, error) {
 		c.recv.XORKeyStream(header[:1], header[:1])
 	}
 	headerLen := 4
-	if header[0]&0x80 != 0 {
+	// Build 12340 marks a three-byte size with the high bit; build 5875
+	// headers are always four bytes.
+	if header[0]&0x80 != 0 && c.Profile().Build != protocol.BuildClassic {
 		headerLen = 5
 	}
 	if _, err := io.ReadFull(c.conn, header[1:headerLen]); err != nil {

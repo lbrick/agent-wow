@@ -1,10 +1,11 @@
 package auth
 
 import (
-	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 func TestNewClient(t *testing.T) {

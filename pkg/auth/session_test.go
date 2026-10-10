@@ -6,12 +6,13 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
-	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"io"
 	"net"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 func TestCheckSession(t *testing.T) {

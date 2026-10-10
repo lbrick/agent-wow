@@ -66,6 +66,39 @@ var wrathCodes = resultCodes{
 	},
 }
 
+// SharedDefines.h, ResponseCodes, mangos-classic revision 8ec338a1704e7dcb1c0213eb7ed58f9231ade40f.
+// Several 1.12 values are shared or marked unsure upstream; this lists the
+// definite ones.
+var classicCodes = resultCodes{
+	createSuccess: 0x2e, deleteSuccess: 0x39,
+	inProgress: []byte{0x2d, 0x38},
+	nameInUse:  0x31, nameRejectedLo: 0x43, nameRejected: 0x4f,
+	messages: map[uint8]string{
+		0x0d: "authentication failed; run 'agent-wow auth login'",
+		0x0e: "realm rejected authentication", 0x0f: "bad server proof",
+		0x10: "realm unavailable", 0x11: "authentication system error",
+		0x12: "billing error", 0x13: "billing expired", 0x14: "client version mismatch",
+		0x15: "unknown account", 0x16: "incorrect password",
+		0x17: "session expired; run 'agent-wow auth login'", 0x18: "server shutting down",
+		0x19: "already logging in", 0x1a: "login server not found", 0x1b: "waiting in realm queue",
+		0x1c: "account banned", 0x1d: "account already online", 0x1e: "no game time",
+		0x1f: "server database busy", 0x20: "account suspended", 0x21: "parental controls",
+		0x26: "realm not found", 0x2c: "character list failed",
+		0x2f: "character creation error", 0x30: "character creation failed",
+		0x31: "name already in use", 0x33: "opposite factions are not permitted on this PvP realm",
+		0x34: "realm character limit reached", 0x35: "account character limit reached",
+		0x3a: "character creation disabled or deletion failed",
+		0x43: "name must not be empty", 0x44: "name too short", 0x45: "name too long",
+		0x46: "invalid name characters", 0x47: "name mixes languages", 0x48: "name rejected for profanity",
+		0x49: "reserved name", 0x4a: "invalid apostrophe", 0x4b: "multiple apostrophes",
+		0x4c: "three consecutive identical name characters", 0x4d: "invalid space in name",
+		0x4e: "consecutive spaces in name", 0x4f: "invalid character name",
+	},
+}
+
 func codesFor(p *protocol.Profile) resultCodes {
+	if p.Build == protocol.BuildClassic {
+		return classicCodes
+	}
 	return wrathCodes
 }

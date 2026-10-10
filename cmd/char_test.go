@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"io"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/agent-wow/agent-wow/pkg/auth"
 	"github.com/agent-wow/agent-wow/pkg/char"
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 type fakeCharacterClient struct {

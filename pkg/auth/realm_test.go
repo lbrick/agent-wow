@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/agent-wow/agent-wow/pkg/protocol"
 	"io"
 	"net"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/agent-wow/agent-wow/pkg/protocol"
 )
 
 func realmListPacket() []byte {

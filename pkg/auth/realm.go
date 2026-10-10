@@ -84,7 +84,11 @@ func (c *Client) ListRealms(ctx context.Context, session *Session) ([]Realm, err
 			return fmt.Errorf("send realm list request: %w", err)
 		}
 		var err error
-		realms, err = readRealms(conn)
+		if c.profile.Build == protocol.BuildClassic {
+			realms, err = readClassicRealms(conn)
+		} else {
+			realms, err = readRealms(conn)
+		}
 		for i := range realms {
 			realms[i].ClientBuild = c.profile.Build
 		}
@@ -175,6 +179,72 @@ func readRealm(r *bytes.Buffer) (Realm, error) {
 		realm.Build = binary.LittleEndian.Uint16(build[3:])
 	}
 	return realm, nil
+}
+
+// readClassicRealms parses the build-5875 realm list (mangos-classic
+// AuthSocket::LoadRealmlist): uint32 unused, uint8 count, then per realm a
+// uint32 type, uint8 flags, name, address, float population, uint8 characters,
+// uint8 category and a zero byte, and a uint16 trailer of 2. The server sends
+// no realm ID, so realms are numbered by list position from 1.
+func readClassicRealms(r io.Reader) ([]Realm, error) {
+	var header [3]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
+		return nil, fmt.Errorf("read realm list header: %w", err)
+	}
+	if header[0] != opcode.AuthRealmList {
+		return nil, fmt.Errorf("unexpected realm list opcode 0x%02x", header[0])
+	}
+	body := make([]byte, binary.LittleEndian.Uint16(header[1:]))
+	if _, err := io.ReadFull(r, body); err != nil {
+		return nil, fmt.Errorf("read realm list body: %w", err)
+	}
+	if len(body) < 7 {
+		return nil, errors.New("realm list body is too short")
+	}
+	count := int(body[4])
+	data := bytes.NewBuffer(body[5 : len(body)-2])
+	if count > data.Len()/15 { // Minimum record: type, flags, two NULs, population, 3 bytes.
+		return nil, errors.New("invalid realm count")
+	}
+	realms := make([]Realm, 0, count)
+	for i := 0; i < count; i++ {
+		var head [5]byte
+		if _, err := io.ReadFull(data, head[:]); err != nil {
+			return nil, fmt.Errorf("read realm %d: %w", i+1, err)
+		}
+		realmType := binary.LittleEndian.Uint32(head[:4])
+		if realmType > 0xff {
+			return nil, fmt.Errorf("read realm %d: invalid realm type %d", i+1, realmType)
+		}
+		// 1.x clients have no build field; the server folds the build into the name.
+		realm := Realm{ID: uint8(i + 1), Type: uint8(realmType), Flags: head[4] &^ RealmFlagSpecifyBuild}
+		var err error
+		if realm.Name, err = realmString(data); err != nil {
+			return nil, fmt.Errorf("read realm %d name: %w", i+1, err)
+		}
+		if realm.Address, err = realmString(data); err != nil {
+			return nil, fmt.Errorf("read realm %d address: %w", i+1, err)
+		}
+		host, port, err := net.SplitHostPort(realm.Address)
+		portNumber, portErr := strconv.Atoi(port)
+		if err != nil || host == "" || portErr != nil || portNumber < 1 || portNumber > 65535 {
+			return nil, fmt.Errorf("read realm %d: invalid realm address: expected host:port", i+1)
+		}
+		var tail [7]byte
+		if _, err := io.ReadFull(data, tail[:]); err != nil {
+			return nil, fmt.Errorf("read realm %d: %w", i+1, err)
+		}
+		realm.Population = math.Float32frombits(binary.LittleEndian.Uint32(tail[:4]))
+		if math.IsNaN(float64(realm.Population)) || math.IsInf(float64(realm.Population), 0) {
+			return nil, fmt.Errorf("read realm %d: invalid realm population", i+1)
+		}
+		realm.Characters, realm.Timezone = tail[4], tail[5]
+		realms = append(realms, realm)
+	}
+	if data.Len() != 0 || !bytes.Equal(body[len(body)-2:], []byte{0x02, 0}) {
+		return nil, errors.New("invalid realm list trailer")
+	}
+	return realms, nil
 }
 
 func realmString(r *bytes.Buffer) (string, error) {

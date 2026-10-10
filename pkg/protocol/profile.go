@@ -9,11 +9,13 @@ import (
 	"strings"
 
 	"github.com/agent-wow/agent-wow/pkg/opcode"
+	"github.com/agent-wow/agent-wow/pkg/opcode/classic"
 )
 
 // Supported client builds.
 const (
-	BuildWrath = 12340 // WoW 3.3.5a against AzerothCore.
+	BuildWrath   = 12340 // WoW 3.3.5a against AzerothCore.
+	BuildClassic = 5875  // WoW 1.12.1 against cMaNGOS Classic.
 )
 
 // DefaultBuild is the build used when the configuration does not choose one.
@@ -136,4 +138,30 @@ var Wrath = &Profile{
 		"CMSG_PLAYER_LOGOUT", "CMSG_LOGOUT_REQUEST", "CMSG_LOGOUT_CANCEL"),
 }
 
-var profiles = []*Profile{Wrath}
+// Classic is WoW 1.12.1 (build 5875) against cMaNGOS Classic. It has no time
+// sync, and the client does not answer Warden: run it against a realm with
+// Warden.Enable = 0.
+var Classic = &Profile{
+	Build:        BuildClassic,
+	Version:      [3]byte{1, 12, 1},
+	AuthProtocol: 3,
+	Release:      "1.12.1",
+	Server:       "cMaNGOS Classic",
+	Op: Opcodes{
+		SMSGAuthChallenge: classic.SMSGAuthChallenge, CMSGAuthSession: classic.CMSGAuthSession, SMSGAuthResponse: classic.SMSGAuthResponse,
+		CMSGCharEnum: classic.CMSGCharEnum, SMSGCharEnum: classic.SMSGCharEnum, CMSGCharCreate: classic.CMSGCharCreate, SMSGCharCreate: classic.SMSGCharCreate,
+		CMSGCharDelete: classic.CMSGCharDelete, SMSGCharDelete: classic.SMSGCharDelete,
+		CMSGPlayerLogin: classic.CMSGPlayerLogin, SMSGLoginVerifyWorld: classic.SMSGLoginVerifyWorld, SMSGCharacterLoginFailed: classic.SMSGCharacterLoginFailed,
+		CMSGPing: classic.CMSGPing, SMSGPong: classic.SMSGPong,
+		CMSGLogoutRequest: classic.CMSGLogoutRequest, SMSGLogoutResponse: classic.SMSGLogoutResponse, SMSGLogoutComplete: classic.SMSGLogoutComplete,
+		SMSGWardenData: classic.SMSGWardenData, CMSGWardenData: classic.CMSGWardenData,
+	},
+	worldName: classic.WorldName,
+	limit:     classic.NumMsgTypes,
+	reserved: reservedSet(classic.WorldName, classic.NumMsgTypes,
+		"CMSG_AUTH_SESSION", "CMSG_AUTH_SRP6_BEGIN", "CMSG_AUTH_SRP6_PROOF", "CMSG_AUTH_SRP6_RECODE",
+		"CMSG_PLAYER_LOGIN", "CMSG_PING", "CMSG_WARDEN_DATA",
+		"CMSG_PLAYER_LOGOUT", "CMSG_LOGOUT_REQUEST", "CMSG_LOGOUT_CANCEL"),
+}
+
+var profiles = []*Profile{Wrath, Classic}

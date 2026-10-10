@@ -80,7 +80,10 @@ func (c *Client) reconnect(conn net.Conn, session *Session) error {
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return fmt.Errorf("create reconnect nonce: %w", err)
 	}
-	proof := digest([]byte(username), nonce[:], challenge[:16], session.Key[:])
+	// cMaNGOS Classic hashes R1, its nonce and K as trimmed BigNumbers
+	// (AuthSocket::_HandleReconnectProof); trimming is a no-op for AzerothCore.
+	t := c.srp().trim
+	proof := digest([]byte(username), t(nonce[:]), t(challenge[:16]), t(session.Key[:]))
 	// AzerothCore's reconnect version proof hashes R1 with 20 zero bytes.
 	var zeros [20]byte
 	version := digest(nonce[:], zeros[:])

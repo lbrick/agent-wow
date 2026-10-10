@@ -270,6 +270,8 @@ func (s *Session) run(ready chan struct{}, timing timings) {
 		}
 	}()
 	e := &engine{s: s, timing: timing, ready: ready, phase: EnteringWorld, pings: make(map[uint32]time.Time)}
+	// Builds without time sync are in the world once login is verified.
+	e.synced = !s.conn.Profile().TimeSync
 	err := e.loop(packets)
 	s.modules.Stop()
 	s.cancel()
