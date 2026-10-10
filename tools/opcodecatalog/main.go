@@ -1,11 +1,13 @@
-// Command opcodecatalog generates world packet constants and labels from
-// AzerothCore's public Opcodes.h in tmp/client-data. It verifies the pinned
-// header's checksum and never accesses the network or running server.
+// Command opcodecatalog generates world packet constants and labels from a
+// server's public Opcodes.h: AzerothCore's for build 12340 (tmp/client-data,
+// package opcode) or cMaNGOS Classic's for build 5875 (tmp/client-data-5875,
+// package opcode/classic). It verifies the pinned header's checksum and never
+// accesses the network or running server.
 //
 // Run from the repository root:
 //
-//	./run client-data:fetch
-//	./run opcodecatalog:generate
+//	./run client-data:fetch [5875]
+//	./run opcodecatalog:generate [5875]
 package main
 
 import (
@@ -27,48 +29,90 @@ type entry struct {
 	value       uint32
 }
 
+// catalog describes one build's opcode source and generated package.
+type catalog struct {
+	build           int
+	release, server string
+	directory, url  string
+	sha256          string
+	enum            *regexp.Regexp
+	null            string // label of opcode 0
+	pkg, constants  string
+	names           string
+	explicitLimit   bool // the enum ends with NUM_MSG_TYPES
+}
+
+var catalogs = map[string]catalog{
+	"12340": {
+		build: 12340, release: "WoW 3.3.5a", server: "AzerothCore",
+		directory: clientdata.Directory, url: clientdata.OpcodesURL, sha256: clientdata.OpcodesSHA256,
+		enum: regexp.MustCompile(`(?s)enum Opcodes : uint16\s*\{(.*?)\};`), null: "NULL_OPCODE",
+		pkg: "opcode", constants: "pkg/opcode/world_gen.go", names: "pkg/opcode/world_names_gen.go", explicitLimit: true,
+	},
+	"5875": {
+		build: 5875, release: "WoW 1.12.1", server: "cMaNGOS Classic",
+		directory: clientdata.ClassicDirectory, url: clientdata.ClassicOpcodesURL, sha256: clientdata.ClassicOpcodesSHA256,
+		enum: regexp.MustCompile(`(?s)enum Opcodes\s*\{(.*?)\};`), null: "MSG_NULL_ACTION",
+		pkg: "classic", constants: "pkg/opcode/classic/world_gen.go", names: "pkg/opcode/classic/world_names_gen.go",
+	},
+}
+
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("Usage: ./run opcodecatalog:generate\nReads tmp/client-data/Opcodes.h and writes pkg/opcode/world_gen.go and pkg/opcode/world_names_gen.go. Run './run client-data:fetch' first.")
+		fmt.Println("Usage: ./run opcodecatalog:generate [12340|5875]\nReads Opcodes.h from tmp/client-data (12340, default) or tmp/client-data-5875 (5875) and writes the build's world_gen.go and world_names_gen.go. Run './run client-data:fetch [5875]' first.")
 		return
 	}
-	if len(os.Args) != 1 {
-		fmt.Fprintln(os.Stderr, "Usage: ./run opcodecatalog:generate")
+	build := "12340"
+	if len(os.Args) == 2 {
+		build = os.Args[1]
+	}
+	cat, ok := catalogs[build]
+	if !ok || len(os.Args) > 2 {
+		fmt.Fprintln(os.Stderr, "Usage: ./run opcodecatalog:generate [12340|5875]")
 		os.Exit(2)
 	}
-	if err := run(clientdata.Directory); err != nil {
+	if err := run(cat); err != nil {
 		fmt.Fprintln(os.Stderr, "generate opcode catalog:", err)
 		os.Exit(1)
 	}
-	fmt.Println("Generated pkg/opcode/world_gen.go and pkg/opcode/world_names_gen.go")
+	fmt.Printf("Generated %s and %s\n", cat.constants, cat.names)
 }
 
-func run(directory string) error {
-	data, err := clientdata.Read(directory, "Opcodes.h")
+func run(cat catalog) error {
+	data, err := clientdata.Read(cat.directory, "Opcodes.h")
 	if err != nil {
 		return err
 	}
-	constants, names, err := generate(data)
+	constants, names, err := generate(data, cat)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile("pkg/opcode/world_gen.go", constants, 0o644); err != nil {
+	if err := os.WriteFile(cat.constants, constants, 0o644); err != nil {
 		return err
 	}
-	return os.WriteFile("pkg/opcode/world_names_gen.go", names, 0o644)
+	return os.WriteFile(cat.names, names, 0o644)
 }
 
-func generate(data []byte) ([]byte, []byte, error) {
-	if fmt.Sprintf("%x", sha256.Sum256(data)) != clientdata.OpcodesSHA256 {
-		return nil, nil, fmt.Errorf("Opcodes.h checksum mismatch; run './run client-data:fetch' to fetch the header from %s", clientdata.OpcodesURL)
+func generate(data []byte, cat catalog) ([]byte, []byte, error) {
+	if fmt.Sprintf("%x", sha256.Sum256(data)) != cat.sha256 {
+		return nil, nil, fmt.Errorf("Opcodes.h checksum mismatch; fetch the header from %s", cat.url)
 	}
-	enum := regexp.MustCompile(`(?s)enum Opcodes : uint16\s*\{(.*?)\};`).FindSubmatch(data)
+	enum := cat.enum.FindSubmatch(data)
 	if enum == nil {
 		return nil, nil, errors.New("missing Opcodes enum")
 	}
 	assignment := regexp.MustCompile(`^([A-Z][A-Z0-9_]+)\s*=\s*(0x[0-9A-Fa-f]+)$`)
-	entries := []entry{{"NullOpcode", "NULL_OPCODE", 0}}
-	identifiers := map[string]bool{"NullOpcode": true, "NumMsgTypes": true}
+	nullName := goName(cat.null)
+	entries := []entry{{nullName, cat.null, 0}}
+	identifiers := map[string]bool{nullName: true, "NumMsgTypes": true}
+	if !cat.explicitLimit {
+		// The first enum line defines opcode 0, already listed above.
+		first := regexp.MustCompile(`(?m)^\s*` + cat.null + `\s*=\s*0x0+,`)
+		if first.FindIndex(enum[1]) == nil {
+			return nil, nil, fmt.Errorf("missing %s definition", cat.null)
+		}
+		enum[1] = first.ReplaceAll(enum[1], nil)
+	}
 	var limit uint32
 	for _, line := range strings.Split(string(enum[1]), "\n") {
 		line, _, _ = strings.Cut(line, "//")
@@ -98,19 +142,29 @@ func generate(data []byte) ([]byte, []byte, error) {
 		identifiers[name] = true
 		entries = append(entries, entry{name, match[1], uint32(value)})
 	}
+	if !cat.explicitLimit {
+		limit = uint32(len(entries))
+	}
 	if limit == 0 {
 		return nil, nil, errors.New("missing NUM_MSG_TYPES boundary")
 	}
-	if !regexp.MustCompile(`\bNULL_OPCODE\s*=\s*0x0000\b`).Match(data) {
+	if cat.explicitLimit && !regexp.MustCompile(`\bNULL_OPCODE\s*=\s*0x0000\b`).Match(data) {
 		return nil, nil, errors.New("missing NULL_OPCODE definition")
 	}
 	var constants, names bytes.Buffer
 	for _, out := range []*bytes.Buffer{&constants, &names} {
-		fmt.Fprintln(out, "// Code generated by ./run opcodecatalog:generate; DO NOT EDIT.")
-		fmt.Fprintln(out, "// WoW 3.3.5a, build 12340.")
-		fmt.Fprintln(out, "// Source: "+clientdata.OpcodesURL)
-		fmt.Fprintln(out, "// SHA-256: "+clientdata.OpcodesSHA256)
-		fmt.Fprintln(out, "\npackage opcode")
+		command := "./run opcodecatalog:generate"
+		if !cat.explicitLimit {
+			command += fmt.Sprintf(" %d", cat.build)
+		}
+		fmt.Fprintf(out, "// Code generated by %s; DO NOT EDIT.\n", command)
+		fmt.Fprintf(out, "// %s, build %d.\n", cat.release, cat.build)
+		if !cat.explicitLimit {
+			fmt.Fprintln(out, "// Server: "+cat.server)
+		}
+		fmt.Fprintln(out, "// Source: "+cat.url)
+		fmt.Fprintln(out, "// SHA-256: "+cat.sha256)
+		fmt.Fprintln(out, "\npackage "+cat.pkg)
 	}
 	fmt.Fprintln(&constants, "\n// World packet identifiers, including obsolete and server-specific entries.")
 	fmt.Fprintln(&constants, "// An identifier being defined does not imply client or server support for it.")
