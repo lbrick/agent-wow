@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/agent-wow/agent-wow/pkg/auth"
 )
@@ -116,28 +117,72 @@ func (c *Conn) authenticateClassic(session *auth.Session, challenge []byte) erro
 		return err
 	}
 	c.send = &classicCipher{key: session.Key, encrypt: true}
-	c.recv = &classicCipher{key: session.Key}
+	op, body, err := c.readFirstClassic(session.Key)
 	for range 4096 {
-		body, err := c.waitPacket(c.Profile().Op.SMSGAuthResponse)
 		if err != nil {
 			return fmt.Errorf("read authentication response (saved session may be stale): %w", err)
 		}
-		if len(body) == 0 {
-			return errors.New("empty authentication response")
-		}
-		switch body[0] {
-		case 0x0c: // AUTH_OK: billing fields, or the one-byte form after a queue.
-			if len(body) != 1 && len(body) != 10 {
-				return errors.New("invalid authentication success response")
+		switch op {
+		case c.Profile().Op.SMSGWardenData:
+			return ErrWardenUnsupported
+		case c.Profile().Op.SMSGAuthResponse:
+			if done, err := classicAuthResult(body); done || err != nil {
+				return err
 			}
-			return nil
-		case 0x1b: // AUTH_WAIT_QUEUE: billing fields and position, then position updates.
-			if len(body) != 5 && len(body) != 14 {
-				return errors.New("invalid authentication queue response")
-			}
-		default:
-			return &AuthError{Code: body[0]}
 		}
+		body, err = c.waitPacket(c.Profile().Op.SMSGAuthResponse)
+		op = c.Profile().Op.SMSGAuthResponse
 	}
 	return errors.New("too many authentication queue updates")
+}
+
+// readFirstClassic reads the first packet after CMSG_AUTH_SESSION. The server
+// sends its rejections (version mismatch, unknown account, bad digest, ban)
+// before m_crypt.Init, unencrypted; AUTH_OK and everything after are
+// encrypted. A plaintext one-byte SMSG_AUTH_RESPONSE header identifies the
+// former; an encrypted header collides with it with probability 2^-32.
+func (c *Conn) readFirstClassic(key [40]byte) (uint16, []byte, error) {
+	var header [4]byte
+	if _, err := io.ReadFull(c.conn, header[:]); err != nil {
+		return 0, nil, err
+	}
+	c.recv = &classicCipher{key: key}
+	response := c.Profile().Op.SMSGAuthResponse
+	if header == [4]byte{0, 3, byte(response), byte(response >> 8)} {
+		body := make([]byte, 1)
+		_, err := io.ReadFull(c.conn, body)
+		return response, body, err
+	}
+	c.recv.XORKeyStream(header[:], header[:])
+	size := int(binary.BigEndian.Uint16(header[:2]))
+	if size < 2 {
+		return 0, nil, fmt.Errorf("invalid realm packet size %d", size)
+	}
+	body := make([]byte, size-2)
+	if _, err := io.ReadFull(c.conn, body); err != nil {
+		return 0, nil, err
+	}
+	return binary.LittleEndian.Uint16(header[2:]), body, nil
+}
+
+// classicAuthResult interprets a build-5875 SMSG_AUTH_RESPONSE. done reports
+// AUTH_OK; a queue update returns neither done nor an error.
+func classicAuthResult(body []byte) (bool, error) {
+	if len(body) == 0 {
+		return false, errors.New("empty authentication response")
+	}
+	switch body[0] {
+	case 0x0c: // AUTH_OK: billing fields, or the one-byte form after a queue.
+		if len(body) != 1 && len(body) != 10 {
+			return false, errors.New("invalid authentication success response")
+		}
+		return true, nil
+	case 0x1b: // AUTH_WAIT_QUEUE: billing fields and position, then position updates.
+		if len(body) != 5 && len(body) != 14 {
+			return false, errors.New("invalid authentication queue response")
+		}
+		return false, nil
+	default:
+		return false, &AuthError{Code: body[0]}
+	}
 }

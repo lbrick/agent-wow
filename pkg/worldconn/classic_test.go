@@ -216,9 +216,12 @@ func TestClassicAuthQueueAndRejection(t *testing.T) {
 	for name, tc := range map[string]struct {
 		responses [][]byte
 		wantCode  uint8
+		plain     bool
 	}{
 		"queued then admitted": {responses: [][]byte{{0x1b, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0}, {0x1b, 1, 0, 0, 0}, {0x0c}}},
-		"unknown account":      {responses: [][]byte{{0x15}}, wantCode: 0x15},
+		// WorldSocket::HandleAuthSession rejects before m_crypt.Init, unencrypted.
+		"unknown account": {responses: [][]byte{{0x15}}, wantCode: 0x15, plain: true},
+		"bad digest":      {responses: [][]byte{{0x0d}}, wantCode: 0x0d, plain: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			realm := serveClassic(t, func(s *classicServer) error {
@@ -228,7 +231,7 @@ func TestClassicAuthQueueAndRejection(t *testing.T) {
 				if _, _, err := s.read(); err != nil {
 					return err
 				}
-				s.crypt = true
+				s.crypt = !tc.plain
 				for _, r := range tc.responses {
 					if err := s.write(classic.SMSGAuthResponse, r); err != nil {
 						return err
