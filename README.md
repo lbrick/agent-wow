@@ -122,6 +122,7 @@ Environment variables take precedence over file settings.
 | Account names | Use at most 10 characters. realmd silently drops a reconnect for longer names, so `auth status` waits until its timeout; login and gameplay are unaffected. |
 | Character creation | 40 race/class pairs and the 1.12 appearance tables (`pkg/char/profiles_5875_gen.go`). |
 | Opcodes | `pkg/opcode/classic`. Module packet keys resolve against this catalog. |
+| Gameplay modules | [`modules/classic`](modules/classic/README.md): world state, movement, combat, and the time example. 3.3.5a modules do not parse 1.12 packets. |
 
 Example `config.yaml`:
 
