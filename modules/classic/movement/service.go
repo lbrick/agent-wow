@@ -49,6 +49,10 @@ type Service struct {
 	pos    wire.Position
 	known  bool
 	speed  float32
+	// forced marks a run speed set by SMSG_FORCE_RUN_SPEED_CHANGE; the world
+	// module only learns speeds from create blocks, so it would be stale.
+	forced bool
+	flags  uint32 // movement flags of the last packet sent
 }
 
 func New(session Session, self uint64) *Service {
@@ -79,7 +83,7 @@ func (s *Service) refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pos, s.known = wire.Position{X: p.X, Y: p.Y, Z: p.Z, O: p.O}, true
-	if me.GetRunSpeed() > 0 {
+	if me.GetRunSpeed() > 0 && !s.forced {
 		s.speed = me.GetRunSpeed()
 	}
 	return nil
@@ -97,7 +101,7 @@ func (s *Service) send(ctx context.Context, op uint16, flags uint32, p wire.Posi
 		return err
 	}
 	s.mu.Lock()
-	s.pos = p
+	s.pos, s.flags = p, flags
 	s.mu.Unlock()
 	return s.session.Invoke(ctx, "world", "set_position", &worldv1.SetPositionRequest{Position: &worldv1.Position{X: p.X, Y: p.Y, Z: p.Z, O: p.O}}, &emptypb.Empty{})
 }
@@ -149,7 +153,13 @@ func (s *Service) MoveTo(ctx context.Context, req *movementv1.MoveToRequest) (*m
 	begin := s.now()
 	total := time.Duration(float64(dist/speed) * float64(time.Second))
 	if err := s.send(ctx, classic.MSGMoveStartForward, wire.MoveForward, at(0)); err != nil {
+		s.stop(at(0))
 		return nil, err
+	}
+	// Once moving, every exit sends MSG_MOVE_STOP so the server never keeps
+	// MOVEFLAG_FORWARD for a client that stopped sending heartbeats.
+	elapsed := func() wire.Position {
+		return at(min(dist, speed*float32(s.now().Sub(begin).Seconds())))
 	}
 	for {
 		left := total - s.now().Sub(begin)
@@ -157,18 +167,20 @@ func (s *Service) MoveTo(ctx context.Context, req *movementv1.MoveToRequest) (*m
 			break
 		}
 		if err := s.sleep(ctx, min(heartbeat, left)); err != nil {
-			s.stop(at(speed * float32(s.now().Sub(begin).Seconds())))
+			s.stop(elapsed())
 			return nil, err
 		}
 		if s.now().Sub(begin) >= total {
 			break
 		}
-		if err := s.send(ctx, classic.MSGMoveHeartbeat, wire.MoveForward, at(speed*float32(s.now().Sub(begin).Seconds()))); err != nil {
+		if err := s.send(ctx, classic.MSGMoveHeartbeat, wire.MoveForward, elapsed()); err != nil {
+			s.stop(elapsed())
 			return nil, err
 		}
 	}
 	end := at(dist)
 	if err := s.send(ctx, classic.MSGMoveStop, 0, end); err != nil {
+		s.stop(end)
 		return nil, err
 	}
 	return &movementv1.MoveToResponse{X: end.X, Y: end.Y, Z: end.Z, ElapsedMs: uint32(s.now().Sub(begin).Milliseconds())}, nil
@@ -232,14 +244,16 @@ func (s *Service) handle(ctx context.Context, op uint16, body []byte) error {
 			return r.Err()
 		}
 		s.mu.Lock()
-		p := s.pos
+		p, flags := s.pos, s.flags
 		if op == classic.SMSGForceRunSpeedChange {
-			s.speed = speed
+			s.speed, s.forced = speed, true
 		}
 		s.mu.Unlock()
 		b := binary.LittleEndian.AppendUint64(nil, guid)
 		b = wire.AppendU32(b, counter)
-		b = wire.AppendMovementInfo(b, 0, now, p)
+		// The ack carries the current movement state, so a mid-move ack does not
+		// read as a stop.
+		b = wire.AppendMovementInfo(b, flags, now, p)
 		return s.session.SendPacket(ctx, uint32(ack), wire.AppendF32(b, speed))
 	}
 	switch op {

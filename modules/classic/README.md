@@ -15,6 +15,8 @@ Gameplay modules for `client_build: 5875` against cMaNGOS Classic (revision `8ec
 - `reaction` uses each faction template's default. Factions the server resolves through the player's reputation can differ.
 - `move_to` interpolates height between the start and the requested `z`. Without `z` it keeps the start height. Pick points in open ground.
 - The world module tracks units and players only; game objects, items and corpses are not exposed.
+- `combat.status` lists kills from `SMSG_LOG_XPGAIN`, so creatures that give no experience are not listed.
+- Movement was designed against cMaNGOS Classic's movement anticheat: no fall or jump packets, a non-zero increasing client time, heartbeats at most 500 ms apart, and positions at the acknowledged run speed. It has been run live only on a realm with the anticheat module disabled (`Enable = 0`).
 
 ## Build and install
 

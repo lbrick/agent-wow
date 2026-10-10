@@ -65,15 +65,14 @@ func (t Template) React(other Template) Reaction {
 // template self, which decides whether it attacks on sight. Factions the
 // server resolves through the player's reputation (Faction.dbc entries with a
 // reputation index) use their template default here, so a faction the player
-// is at war with through reputation reads as its template reaction.
+// is at war with through reputation reads as its template reaction. Other
+// players are classified by template too; the server's duel, group and
+// free-for-all rules for players are not applied.
 func ReactionTo(unit, self uint32) Reaction {
 	u, ok1 := Lookup(unit)
 	s, ok2 := Lookup(self)
-	switch {
-	case !ok1 || !ok2:
+	if !ok1 || !ok2 {
 		return Unknown
-	case unit == self:
-		return Friendly
 	}
 	return u.React(s)
 }

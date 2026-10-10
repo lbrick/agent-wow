@@ -108,3 +108,23 @@ func TestAcks(t *testing.T) {
 		t.Fatalf("worldport ack %+v", sent[2])
 	}
 }
+
+func TestForcedSpeedSurvivesRefresh(t *testing.T) {
+	s, f := newService(wire.Position{})
+	slow := wire.AppendF32(wire.AppendU32(wire.AppendPackedGUID(nil, 7), 1), 3.5) // a snare
+	s.OnPacket(context.Background(), &modv1.WorldPacket{Opcode: classic.SMSGForceRunSpeedChange, Payload: slow})
+	s.flags = wire.MoveForward
+	fast := wire.AppendF32(wire.AppendU32(wire.AppendPackedGUID(nil, 7), 2), 3.5)
+	s.OnPacket(context.Background(), &modv1.WorldPacket{Opcode: classic.SMSGForceRunSpeedChange, Payload: fast})
+	if ack := f.Sent()[1]; binary.LittleEndian.Uint32(ack.Body[12:]) != wire.MoveForward {
+		t.Fatalf("mid-move ack flags %#x", binary.LittleEndian.Uint32(ack.Body[12:]))
+	}
+	// The world module still reports 7; the move must use the acknowledged 3.5.
+	resp, err := s.MoveTo(context.Background(), &movementv1.MoveToRequest{X: 35})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ElapsedMs != 10000 {
+		t.Fatalf("35 yards took %d ms, want 10000 at 3.5 yards/s", resp.ElapsedMs)
+	}
+}
