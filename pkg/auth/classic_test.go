@@ -225,7 +225,7 @@ func classicRealmList(records ...[]byte) []byte {
 
 func TestReadClassicRealms(t *testing.T) {
 	packet := classicRealmList(
-		classicRealmRecord(1, RealmFlagSpecifyBuild, "MaNGOS (1,12,1)", "172.18.0.23:8085", 0.5, 2, 1),
+		classicRealmRecord(1, RealmFlagSpecifyBuild, "MaNGOS (1,12,1)", "127.0.0.1:8085", 0.5, 2, 1),
 		classicRealmRecord(4, RealmFlagOffline, "Test", "127.0.0.1:8086", 0, 0, 1),
 	)
 	realms, err := readClassicRealms(bytes.NewReader(packet))
@@ -233,7 +233,7 @@ func TestReadClassicRealms(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Realm{
-		{ID: 1, Name: "MaNGOS (1,12,1)", Address: "172.18.0.23:8085", Type: 1, Population: 0.5, Characters: 2, Timezone: 1},
+		{ID: 1, Name: "MaNGOS (1,12,1)", Address: "127.0.0.1:8085", Type: 1, Population: 0.5, Characters: 2, Timezone: 1},
 		{ID: 2, Name: "Test", Address: "127.0.0.1:8086", Type: 4, Flags: RealmFlagOffline, Timezone: 1},
 	}
 	if len(realms) != len(want) {

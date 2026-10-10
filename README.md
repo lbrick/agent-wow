@@ -119,7 +119,7 @@ Environment variables take precedence over file settings.
 | Warden | Not implemented. The realm must run with `Warden.Enable = 0` in `anticheat.conf`; a Warden request ends the session with an error naming that setting. |
 | Realm list | cMaNGOS Classic's realmd serves it only on a full logon connection, so every command that refreshes realms logs in again with `auth.json` and saves the new session. `auth status` still checks the saved session without a password. |
 | Realm IDs | The 1.12 realm list carries none; realms are numbered from 1 in list order. |
-| Account names | At most 10 characters: realmd's reconnect rejects longer names. |
+| Account names | Use at most 10 characters. realmd silently drops a reconnect for longer names, so `auth status` waits until its timeout; login and gameplay are unaffected. |
 | Character creation | 40 race/class pairs and the 1.12 appearance tables (`pkg/char/profiles_5875_gen.go`). |
 | Opcodes | `pkg/opcode/classic`. Module packet keys resolve against this catalog. |
 
@@ -128,7 +128,7 @@ Example `config.yaml`:
 ```yaml
 client_build: 5875
 authserver:
-  host: 172.18.0.24
+  host: realmd.example.internal
   port: 3724
 ```
 
